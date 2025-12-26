@@ -35,13 +35,21 @@ import java.util.Set;
  * @see DataTypes
  * @since 0.4.0
  */
+// DataType 是一个至关重要的抽象类。它不仅定义了数据的类型特征，还直接影响了数据的序列化、在磁盘上的存储方式以及与计算引擎（如 Flink/Spark）之间的类型映射。
+// 它的主要作用包括：
+// 类型定义与标准化：统一描述 Paimon 内部支持的所有数据类型（如 INT, VARCHAR, MAP, ARRAY 等），并与 SQL 标准保持一致。
+// Schema 描述：它是构建表结构（Schema）的基本单元。表中的每一列都由一个具体的 DataType 实例来定义。
+// 行为契约：定义了一套标准接口，用于类型的复制、空值处理（Nullability）、SQL 字符串化表示以及类型访问者模式（Visitor Pattern）的支持。
+// 类型检测与分类：通过 DataTypeRoot 和 DataTypeFamily 机制，方便地判断某个类型是否属于特定的家族（例如：是否是“数值型”家族或“字符串”家族）。
 @Public
 public abstract class DataType implements Serializable {
 
     private static final long serialVersionUID = 1L;
-
+    // 标记该数据类型是否允许为 NULL。
+    // 在存储优化中，不可为空的列通常可以节省存储空间并提高计算性能。
     private final boolean isNullable;
-
+    // 类型根节点。
+    // 这是一个枚举，标识了该类型的本质分类（如 INTEGER、VARCHAR、ARRAY 等），不包含长度或精度等额外参数。
     private final DataTypeRoot typeRoot;
 
     public DataType(boolean isNullable, DataTypeRoot typeRoot) {
@@ -66,6 +74,7 @@ public abstract class DataType implements Serializable {
      *
      * @param typeRoot The root type to check against for equality
      */
+    // 判断当前类型的根节点是否匹配指定的 typeRoot
     public boolean is(DataTypeRoot typeRoot) {
         return this.typeRoot == typeRoot;
     }
@@ -75,6 +84,7 @@ public abstract class DataType implements Serializable {
      *
      * @param typeRoots The root types to check against for equality
      */
+    // 判断当前类型是否匹配给定列表中的任意一个根类型。
     public boolean isAnyOf(DataTypeRoot... typeRoots) {
         return Arrays.stream(typeRoots).anyMatch(tr -> this.typeRoot == tr);
     }
@@ -85,6 +95,7 @@ public abstract class DataType implements Serializable {
      *
      * @param typeFamilies The families to check against for equality
      */
+    // 判断当前类型是否属于给定列表中的任意一个类型家族。
     public boolean isAnyOf(DataTypeFamily... typeFamilies) {
         return Arrays.stream(typeFamilies).anyMatch(tf -> this.typeRoot.getFamilies().contains(tf));
     }

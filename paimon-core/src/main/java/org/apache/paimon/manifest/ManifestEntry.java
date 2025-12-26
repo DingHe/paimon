@@ -36,14 +36,21 @@ import static org.apache.paimon.utils.SerializationUtils.newBytesType;
  *
  * @since 0.9.0
  */
+// 是 Manifest File（清单文件） 内部存储的真实数据单元
+// ManifestEntry 代表了对一个 数据文件（Data File） 的一次操作记录。
+// 状态记录器：它不仅仅记录“有哪些文件”，还记录了这些文件是“新增加的（ADD）”还是“被标记删除的（DELETE）”。
+// 连接纽带：它将文件的物理信息（文件名、大小、记录数）与逻辑信息（分区、桶、LSM 级数）绑定在一起。
+// 元数据存储实体：它是真正会被序列化并写入磁盘（.manifest 文件）的对象。通过这些条目，Paimon 能够构建出表在任何快照下的文件视图。
 @Public
 public interface ManifestEntry extends FileEntry {
-
+    // 定义了该条目在持久化（序列化为 Avro 或 ORC）时的物理结构。
     RowType SCHEMA =
             new RowType(
                     false,
                     Arrays.asList(
+                            // 对应 FileKind，存为 TinyInt（0 或 1）
                             new DataField(0, "_KIND", new TinyIntType(false)),
+                            // _PARTITION: 分区信息，存为二进制。
                             new DataField(1, "_PARTITION", newBytesType(false)),
                             new DataField(2, "_BUCKET", new IntType(false)),
                             new DataField(3, "_TOTAL_BUCKETS", new IntType(false)),

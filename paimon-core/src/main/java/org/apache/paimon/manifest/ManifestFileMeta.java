@@ -37,24 +37,38 @@ import java.util.Objects;
  *
  * @since 0.9.0
  */
+// 我们可以把 Paimon 的元数据结构看作一个树状层级： Snapshot -> Manifest List -> Manifest File -> Data File。
+// ManifestFileMeta 的作用就是在 Manifest List 中代表一个具体的 Manifest File。它的核心价值在于查询裁剪（Pruning）：
+// 过滤加速：它记录了该清单文件所包含的所有数据文件的统计信息（如分区范围、Bucket 范围）。
+// 元数据索引：在扫描数据之前，Paimon 会先读取 Manifest List 里的这些 ManifestFileMeta，如果某个清单文件的分区范围与查询条件不匹配，则直接跳过该清单文件及其下属的所有数据文件，从而极大提高查询效率。
 @Public
 public class ManifestFileMeta {
-
+    // SCHEMA: 定义了该类在序列化时的结构（RowType）。
+    // 它指定了字段的顺序和类型（如 _FILE_NAME 是 VarChar，_FILE_SIZE 是 BigInt），这使得 Paimon 可以将这些元数据像普通表数据一样高效地存储。
     public static final RowType SCHEMA =
             new RowType(
                     false,
                     Arrays.asList(
+                            // 清单文件的名称（通常是随机生成的 UUID 文件名）
                             new DataField(
                                     0, "_FILE_NAME", new VarCharType(false, Integer.MAX_VALUE)),
                             new DataField(1, "_FILE_SIZE", new BigIntType(false)),
+                            // 该清单中标记为“新增（ADD）”状态的数据文件数量。
                             new DataField(2, "_NUM_ADDED_FILES", new BigIntType(false)),
+                            // 该清单中标记为“删除（DELETE）”状态的数据文件数量。
                             new DataField(3, "_NUM_DELETED_FILES", new BigIntType(false)),
+                            // 最核心属性。类型为 SimpleStats，
+                            // 记录了该清单中所有数据文件所属分区的最小值和最大值。通过它，引擎能快速判断该清单是否包含目标分区的数据。
                             new DataField(4, "_PARTITION_STATS", SimpleStats.SCHEMA),
+                            // 写入该清单文件时所使用的表结构（Schema）ID
                             new DataField(5, "_SCHEMA_ID", new BigIntType(false)),
+                            // 该清单包含的数据文件所属 Bucket（桶）的范围。
                             new DataField(6, "_MIN_BUCKET", new IntType(true)),
                             new DataField(7, "_MAX_BUCKET", new IntType(true)),
+                            // 该清单包含的数据文件在 LSM 树中的层级（Level）范围
                             new DataField(8, "_MIN_LEVEL", new IntType(true)),
                             new DataField(9, "_MAX_LEVEL", new IntType(true)),
+                            // 该清单中包含的数据行的唯一 ID 范围（如果开启了 Row ID 追踪）。
                             new DataField(10, "_MIN_ROW_ID", new BigIntType(true)),
                             new DataField(11, "_MAX_ROW_ID", new BigIntType(true))));
 

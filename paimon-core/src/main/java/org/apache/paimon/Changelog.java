@@ -38,6 +38,11 @@ import java.util.Map;
  * one source:
  * <li>The changelog file. Eg: from the changelog-producer = 'input'
  */
+// 在流式数据湖架构中，Snapshot（快照）代表了表在某一时刻的完整状态。然而，为了节省空间，旧的 Snapshot 会被定期清理（Expire）。
+// Changelog 类的核心作用在于：解弃变更日志与快照的绑定关系。
+// 长生命周期保持：有些下游系统（如 Flink 流式读取）需要消费更久之前的变更数据，即使对应的快照已经因为过期被删除了，Paimon 也可以通过将 Snapshot 转化为 Changelog 元数据文件的方式，保留其变更信息。
+// 状态分离：它允许用户设置不同的保留策略。例如：快照只保留 1 小时（用于故障恢复），但变更日志保留 7 天（用于下游增量消费）。
+// 统一结构：由于它继承自 Snapshot，它包含了产生该变更时的所有上下文信息（如 Manifest 列表、Schema ID 等）。
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class Changelog extends Snapshot {
 

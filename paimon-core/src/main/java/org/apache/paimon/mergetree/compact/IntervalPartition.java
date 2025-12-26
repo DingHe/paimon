@@ -30,6 +30,10 @@ import java.util.PriorityQueue;
 import java.util.stream.Collectors;
 
 /** Algorithm to partition several data files into the minimum number of {@link SortedRun}s. */
+// 在 Apache Paimon 的 Merge Tree（合并树）架构中，
+// IntervalPartition 是一个极其核心的算法类。
+// 它决定了如何将杂乱的、可能有主键重叠的数据文件，科学地组织成“互不重叠”或“最小冲突”的逻辑组。
+// IntervalPartition 的作用可以概括为：将一组数据文件在主键维度上进行“解耦”和“分组”。
 public class IntervalPartition {
 
     private final List<DataFileMeta> files;

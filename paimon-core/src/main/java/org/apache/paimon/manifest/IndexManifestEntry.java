@@ -42,6 +42,11 @@ import static org.apache.paimon.utils.SerializationUtils.newStringType;
  *
  * @since 0.9.0
  */
+// IndexManifestEntry 是索引清单文件的基本数据单元。
+// 如果说 ManifestEntry 记录的是数据文件的变更，那么 IndexManifestEntry 记录的就是**索引文件（Index File）**的变更。
+// 索引版本追踪：Paimon 的索引（如 Hash Index 或 Deletion Vectors）也是随快照（Snapshot）增量更新的。这个类标记了某个索引文件是被“添加”还是“删除”。
+// 物理与逻辑的映射：它将物理上的索引文件（文件名、大小等）与逻辑上的数据归属（属于哪个分区、哪个桶）关联起来。
+// 元数据持久化：它是写入 index-manifest-x 文件的真实行数据。当 Paimon 需要定位某个桶的删除向量（Deletion Vector）或索引信息时，会通过扫描这些 Entry 来查找到具体的物理文件。
 @Public
 public class IndexManifestEntry {
 

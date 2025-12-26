@@ -37,15 +37,24 @@ import static org.apache.paimon.utils.EncodingUtils.escapeSingleQuotes;
  *
  * @since 0.4.0
  */
+// DataField 类的主要作用是封装列的定义。它不仅仅包含列名和类型，还承载了 Paimon 湖仓一体能力中至关重要的 Schema 演进（Schema Evolution） 信息
+// 身份标识（Identity）：通过唯一的 id 追踪列。在 Paimon 中，即便列被重命名，其 id 保持不变，这使得底层数据文件和元数据能够始终正确匹配。
+// 物理与逻辑描述：包含列名（Name）、数据类型（DataType）、注释（Description）以及默认值（Default Value）。
+// 版本兼容性支持：提供多种比较方法，用于判断在 Schema 变更前后，两个字段是否逻辑一致或属于包含关系。
 @Public
 public final class DataField implements Serializable {
 
     private static final long serialVersionUID = 1L;
-
+    // 核心属性。
+    // 字段的唯一标识符（Field ID）。这是 Paimon 处理列增加、删除、重命名的关键，ID 由系统自动分配且不可更改。
     private final int id;
+    // 字段名称（逻辑名）
     private final String name;
+    // 字段的数据类型（如 IntType, VarCharType 等）
     private final DataType type;
+    // 可选的字段描述/注释（COMMENT）
     private final @Nullable String description;
+    // 可选的默认值。当读取旧版本数据文件中不存在该列时，可以返回此默认值。
     private final @Nullable String defaultValue;
 
     public DataField(int id, String name, DataType dataType) {

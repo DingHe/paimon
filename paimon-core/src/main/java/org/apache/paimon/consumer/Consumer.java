@@ -32,11 +32,17 @@ import java.io.UncheckedIOException;
 import java.util.Optional;
 
 /** Consumer which contains next snapshot. */
+// Consumer 类的作用可以概括为：消费位点的持久化载体。
+// 在 Paimon 的流式读取（Streaming Read）过程中，为了保证 Exactly-once（精确一次）或至少一次的消费语义，系统需要将消费进度记录在文件系统中。Consumer 类定义了这些进度文件的内容格式。
+// 状态存储：它只存储一个关键信息——下一个待处理的快照 ID (nextSnapshot)。
+// 序列化与反序列化：负责将进度信息在内存对象与 JSON 字符串（最终存为文件）之间进行转换。
+// 读取鲁棒性：提供带有重试机制的加载方法，确保在分布式环境下读取位点文件时的可靠性。
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class Consumer {
-
+    // 静态常量，定义 JSON 序列化时使用的字段键名，固定为 "nextSnapshot"。
     private static final String FIELD_NEXT_SNAPSHOT = "nextSnapshot";
-
+    // 核心数据字段。
+    // 记录了该消费者期望消费的下一个快照（Snapshot）的序列号（ID）。
     private final long nextSnapshot;
 
     @JsonCreator

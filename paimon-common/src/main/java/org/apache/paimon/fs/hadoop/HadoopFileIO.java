@@ -48,18 +48,25 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
+// HadoopFileIO 的本质是一个适配器（Adapter）。它将 Paimon 定义的通用文件操作接口（如 newInputStream, exists 等）转换为 Hadoop FileSystem 抽象类的具体调用。
+// 生态互通：让 Paimon 可以直接读写 HDFS、S3A、OSS、Azure Blob 等任何实现了 Hadoop FileSystem 接口的存储。
+// 配置桥接：将 Paimon 的 CatalogContext 转换为 Hadoop 的 Configuration 对象。
+// 缓存机制：通过 fsMap 缓存不同的 FileSystem 实例，避免重复创建连接导致的性能损耗。
+// 读优化：封装了 HadoopSeekableInputStream，对分布式存储中的小跨度跳转（Seek）进行了跳过处理优化。
+// 原子写增强：尝试利用 Hadoop 的底层重命名 API（支持 OVERWRITE 参数）来实现更可靠的原子文件覆盖。
 
 /** Hadoop {@link FileIO}. */
 public class HadoopFileIO implements FileIO {
 
     private static final long serialVersionUID = 1L;
-
+    // 包装了 Hadoop 的 Configuration，使其在分布式节点间（如 Flink TaskManager）可序列化传输。
     protected SerializableConfiguration hadoopConf;
-
+    // Paimon 的全局配置选项，用于控制安全设置等。
     private org.apache.paimon.options.Options options;
-
+    // 缓存容器。
+    // 根据 Scheme（如 hdfs）和 Authority（如 host:port）缓存已创建的 FileSystem 对象。使用 volatile 保证多线程可见性。
     protected transient volatile Map<Pair<String, String>, FileSystem> fsMap;
-
+    // 当前 IO 实例关联的基础路径
     private final Path path;
 
     public HadoopFileIO(Path path) {
@@ -70,23 +77,23 @@ public class HadoopFileIO implements FileIO {
     public void setFileSystem(FileSystem fs) throws IOException {
         getFileSystem(path(path), p -> fs);
     }
-
+    // 判断路径是否指向对象存储（如 S3/OSS），这会影响 Paimon 底层合并文件的策略。
     @Override
     public boolean isObjectStore() {
         String scheme = path.toUri().getScheme().toLowerCase(Locale.US);
         return FileIOUtils.isObjectStore(scheme);
     }
-
+    // 从 Paimon 的 Catalog 上下文中提取 Hadoop 配置并保存。
     @Override
     public void configure(CatalogContext context) {
         this.hadoopConf = new SerializableConfiguration(context.hadoopConf());
         this.options = context.options();
     }
-
+    // 返回原始的 Hadoop 配置对象
     public Configuration hadoopConf() {
         return hadoopConf.get();
     }
-
+    // 返回封装后的输入流，支持 seek 操作
     @Override
     public SeekableInputStream newInputStream(Path path) throws IOException {
         org.apache.hadoop.fs.Path hadoopPath = path(path);
@@ -383,7 +390,8 @@ public class HadoopFileIO implements FileIO {
     }
 
     // ============================== extra methods ===================================
-
+    // 用于缓存反射获取的 Hadoop rename 方法，
+    // 提高原子覆盖操作的执行效率。
     private transient volatile AtomicReference<Method> renameMethodRef;
 
     public boolean tryAtomicOverwriteViaRename(Path dst, String content) throws IOException {

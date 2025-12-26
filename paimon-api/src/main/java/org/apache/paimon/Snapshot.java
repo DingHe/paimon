@@ -56,6 +56,12 @@ import java.util.Objects;
  *
  * @since 0.9.0
  */
+// Snapshot 类是一个极其核心的元数据类。它代表了表在某个特定时间点的完整状态视图。
+// Snapshot 是 Paimon 表版本控制的基石。每当有数据提交（Commit）时，Paimon 就会生成一个新的快照文件（存储在 metadata/ 目录下，文件名如 snapshot-1）
+// 数据入口：它保存了指向该版本所有数据文件的指针（通过 Manifest List）。
+// 版本隔离：通过读取不同的快照 ID，用户可以实现“时间旅行”（Time Travel），读取历史版本的数据。
+// 变更追踪：它不仅记录了当前有哪些数据，还记录了当前提交产生了哪些 Changelog，以及这次提交的类型（新增、压缩、覆盖等）。
+
 @Public
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class Snapshot implements Serializable {
@@ -92,19 +98,22 @@ public class Snapshot implements Serializable {
 
     // version of snapshot
     // null for paimon <= 0.2
+    // 快照文件的格式版本（当前最新为 3）。用于处理不同版本 Paimon 之间的兼容性。
     @JsonProperty(FIELD_VERSION)
     @Nullable
     protected final Integer version;
-
+    // 快照的唯一递增标识
     @JsonProperty(FIELD_ID)
     protected final long id;
-
+    // 该快照对应的数据表结构（Schema）的 ID
     @JsonProperty(FIELD_SCHEMA_ID)
     protected final long schemaId;
 
+    //  指向一个 Manifest List 文件，记录了该快照之前已存在的所有数据文件。
     // a manifest list recording all changes from the previous snapshots
     @JsonProperty(FIELD_BASE_MANIFEST_LIST)
     protected final String baseManifestList;
+
 
     @JsonProperty(FIELD_BASE_MANIFEST_LIST_SIZE)
     @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -113,6 +122,7 @@ public class Snapshot implements Serializable {
 
     // a manifest list recording all new changes occurred in this snapshot
     // for faster expire and streaming reads
+    // 指向一个 Manifest List 文件，记录了本次提交新增的数据文件。这种分离设计可以加速流式读取。
     @JsonProperty(FIELD_DELTA_MANIFEST_LIST)
     protected final String deltaManifestList;
 
@@ -123,6 +133,7 @@ public class Snapshot implements Serializable {
 
     // a manifest list recording all changelog produced in this snapshot
     // null if no changelog is produced, or for paimon <= 0.2
+    // 指向本次提交生成的 Changelog 文件的清单，用于流式消费。
     @JsonProperty(FIELD_CHANGELOG_MANIFEST_LIST)
     @Nullable
     protected final String changelogManifestList;
@@ -134,10 +145,11 @@ public class Snapshot implements Serializable {
 
     // a manifest recording all index files of this table
     // null if no index file
+    // 记录哈希索引（Index）等辅助信息的文件
     @JsonProperty(FIELD_INDEX_MANIFEST)
     @JsonInclude(JsonInclude.Include.NON_NULL)
     protected final String indexManifest;
-
+    // 执行本次提交的用户标识
     @JsonProperty(FIELD_COMMIT_USER)
     protected final String commitUser;
 
@@ -148,15 +160,22 @@ public class Snapshot implements Serializable {
     //
     // If snapshot A has a smaller commitIdentifier than snapshot B, then snapshot A must be
     // committed before snapshot B, and thus snapshot A must contain older records than snapshot B.
+    // 提交标识符（在 Flink 中通常对应 Checkpoint ID）。用于幂等性校验，防止重复提交。
     @JsonProperty(FIELD_COMMIT_IDENTIFIER)
     protected final long commitIdentifier;
 
+    // 提交类型，包括：
+    //APPEND: 追加新数据。
+    //COMPACT: 文件合并优化，不改变逻辑数据。
+    //OVERWRITE: 覆盖旧数据（如 INSERT OVERWRITE 或 DELETE）。
+    //ANALYZE: 仅收集统计信息。
     @JsonProperty(FIELD_COMMIT_KIND)
     protected final CommitKind commitKind;
-
+    // 快照创建时的毫秒级时间戳
     @JsonProperty(FIELD_TIME_MILLIS)
     protected final long timeMillis;
 
+    // 如果使用了外部日志系统（如 Kafka），记录消费的偏移量。
     @JsonProperty(FIELD_LOG_OFFSETS)
     @JsonInclude(JsonInclude.Include.NON_NULL)
     @Nullable
@@ -164,18 +183,21 @@ public class Snapshot implements Serializable {
 
     // record count of all changes occurred in this snapshot
     // null for paimon <= 0.3
+    // 该快照下表的所有记录总数。
     @JsonProperty(FIELD_TOTAL_RECORD_COUNT)
     @Nullable
     protected final Long totalRecordCount;
 
     // record count of all new changes occurred in this snapshot
     // null for paimon <= 0.3
+    // 本次提交影响的记录数
     @JsonProperty(FIELD_DELTA_RECORD_COUNT)
     @Nullable
     protected final Long deltaRecordCount;
 
     // record count of all changelog produced in this snapshot
     // null for paimon <= 0.3
+    // 本次生成的 Changelog 记录数
     @JsonProperty(FIELD_CHANGELOG_RECORD_COUNT)
     @JsonInclude(JsonInclude.Include.NON_NULL)
     @Nullable
@@ -185,6 +207,7 @@ public class Snapshot implements Serializable {
     // null for paimon <= 0.3
     // null if there is no watermark in new committing, and the previous snapshot does not have a
     // watermark
+    // 记录本次提交时输入数据的最高水位线，用于流处理。
     @JsonProperty(FIELD_WATERMARK)
     @JsonInclude(JsonInclude.Include.NON_NULL)
     @Nullable
@@ -192,6 +215,7 @@ public class Snapshot implements Serializable {
 
     // stats file name for statistics of this table
     // null if no stats file
+    // 指向包含表统计信息（如列的最大/最小值、空值数）的文件名
     @JsonInclude(JsonInclude.Include.NON_NULL)
     @JsonProperty(FIELD_STATISTICS)
     @Nullable
@@ -199,11 +223,12 @@ public class Snapshot implements Serializable {
 
     // properties
     // null for paimon <= 1.1 or empty properties
+    // 本次快照附带的自定义属性
     @JsonInclude(JsonInclude.Include.NON_NULL)
     @JsonProperty(FIELD_PROPERTIES)
     @Nullable
     protected final Map<String, String> properties;
-
+    // 用于唯一行标识符（Row ID）生成的下一个可用 ID。
     @Nullable
     @JsonInclude(JsonInclude.Include.NON_NULL)
     @JsonProperty(FIELD_NEXT_ROW_ID)

@@ -61,18 +61,34 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  *
  * @since 0.4.0
  */
+// FileIO 旨在屏蔽不同存储系统（如本地磁盘、HDFS、S3、OSS、OSS-HADOOP 等）之间的差异，为 Paimon 上层逻辑提供统一的文件读写接口。
+// 存储无关性：Paimon 的核心逻辑（如 Snapshot 管理、LSM 树维护）不需要关心数据是存在 S3 还是 HDFS。
+// 多环境适配：支持 Hadoop 生态的 FileSystem（通过 Hadoop 适配器），也支持原生的对象存储 API。
+// 原子性与事务支持：提供了两阶段提交（Two-phase commit）写操作的接口，这对于保证流式写入过程中的 ACID 特性至关重要。
+// 动态加载：利用 Java 的 ServiceLoader 机制，根据文件路径的 scheme（如 s3://）动态选择合适的 IO 实现。
+// Paimon FileIO 的工作流示意
+//初始化：用户在 Catalog 中配置了 s3:// 路径。
+//获取实例：FileIO.get() 通过 SPI 发现 S3FileIOLoader 并初始化 S3FileIO。
+//写入数据：Paimon 的 FileWriter 调用 newTwoPhaseOutputStream 产生临时文件。
+//提交操作：在 Checkpoint 成功后，调用 rename 将临时文件变为正式可见的 Snapshot 文件。
+
+
 @Public
 @ThreadSafe
 public interface FileIO extends Serializable, Closeable {
 
     Logger LOG = LoggerFactory.getLogger(FileIO.class);
 
+    // 返回该 IO 是否属于对象存储（如 S3）。
+    // 对象存储在目录改名、列举文件等方面与传统文件系统（如 HDFS）性能特征不同，Paimon 会根据此标记进行优化。
     boolean isObjectStore();
 
     /** Configure by {@link CatalogContext}. */
+    // 使用 Catalog 配置初始化该 IO 实例（如读取 Access Key, Secret Key 等）。
     void configure(CatalogContext context);
 
     /** Set filesystem options at runtime. Usually used for job-level settings. */
+    // 允许在运行时（如任务运行阶段）设置临时的文件系统参数
     default void setRuntimeContext(Map<String, String> options) {}
 
     /**
@@ -80,6 +96,7 @@ public interface FileIO extends Serializable, Closeable {
      *
      * @param path the file to open
      */
+    // 打开一个支持随机访问的输入流（Seekable），用于读取数据文件。
     SeekableInputStream newInputStream(Path path) throws IOException;
 
     /**
@@ -91,6 +108,7 @@ public interface FileIO extends Serializable, Closeable {
      * @throws IOException Thrown, if the stream could not be opened because of an I/O, or because a
      *     file already exists at that path and the write mode indicates to not overwrite the file.
      */
+    // 创建一个标准输出流
     PositionOutputStream newOutputStream(Path path, boolean overwrite) throws IOException;
 
     /**
@@ -108,6 +126,8 @@ public interface FileIO extends Serializable, Closeable {
      *     file already exists at that path and the write mode indicates to not overwrite the file.
      * @throws UnsupportedOperationException if the filesystem does not support transactional writes
      */
+    // 创建一个支持两阶段提交的流。
+    // 数据写入后不会立即生效，需通过 Committer 提交。默认实现是 RenamingTwoPhaseOutputStream（通过临时文件+重命名模拟）。
     default TwoPhaseOutputStream newTwoPhaseOutputStream(Path path, boolean overwrite)
             throws IOException {
         return new RenamingTwoPhaseOutputStream(this, path, overwrite);
@@ -121,6 +141,7 @@ public interface FileIO extends Serializable, Closeable {
      * @throws FileNotFoundException when the path does not exist; IOException see specific
      *     implementation
      */
+    // 获取文件的基本信息（大小、是否为目录、修改时间等）
     FileStatus getFileStatus(Path path) throws IOException;
 
     /**
@@ -129,6 +150,7 @@ public interface FileIO extends Serializable, Closeable {
      * @param path given path
      * @return the statuses of the files/directories in the given path
      */
+    // 列出目录下的直接子文件/目录
     FileStatus[] listStatus(Path path) throws IOException;
 
     /**
@@ -139,6 +161,7 @@ public interface FileIO extends Serializable, Closeable {
      *     otherwise only files in the current directory will be listed
      * @return the statuses of the files in the given path
      */
+    // 列出目录下所有的文件。
     default FileStatus[] listFiles(Path path, boolean recursive) throws IOException {
         List<FileStatus> files = new ArrayList<>();
         RemoteIterator<FileStatus> iter = listFilesIterative(path, recursive);
@@ -156,6 +179,9 @@ public interface FileIO extends Serializable, Closeable {
      *     otherwise only files in the current directory will be listed
      * @return an {@link RemoteIterator} over {@link FileStatus} of the files in the given path
      */
+    // 重要优化。
+    // 返回一个迭代器，递归地获取文件。
+    // 这对包含海量文件的目录非常友好，避免一次性加载导致的内存溢出。
     default RemoteIterator<FileStatus> listFilesIterative(Path path, boolean recursive)
             throws IOException {
         Queue<FileStatus> files = new LinkedList<>();
@@ -200,6 +226,7 @@ public interface FileIO extends Serializable, Closeable {
      * @param path given path
      * @return the statuses of the directories in the given path
      */
+    // 仅列出子目录
     default FileStatus[] listDirectories(Path path) throws IOException {
         FileStatus[] statuses = listStatus(path);
         if (statuses != null) {
@@ -213,6 +240,7 @@ public interface FileIO extends Serializable, Closeable {
      *
      * @param path source file
      */
+    // 判断路径是否存在
     boolean exists(Path path) throws IOException;
 
     /**
@@ -224,6 +252,7 @@ public interface FileIO extends Serializable, Closeable {
      *     <code>true</code> or <code>false</code>
      * @return <code>true</code> if delete is successful, <code>false</code> otherwise
      */
+    // 删除文件或目录
     boolean delete(Path path, boolean recursive) throws IOException;
 
     /**
@@ -235,6 +264,7 @@ public interface FileIO extends Serializable, Closeable {
      *     otherwise
      * @throws IOException thrown if an I/O error occurs while creating the directory
      */
+    // 创建目录（递归创建父目录，类似 mkdir -p）
     boolean mkdirs(Path path) throws IOException;
 
     /**
@@ -244,6 +274,8 @@ public interface FileIO extends Serializable, Closeable {
      * @param dst the new name of the file/directory
      * @return <code>true</code> if the renaming was successful, <code>false</code> otherwise
      */
+    // 文件重命名。
+    // 在很多文件系统中，这是保证原子性的核心操作。
     boolean rename(Path src, Path dst) throws IOException;
 
     /**
@@ -256,7 +288,7 @@ public interface FileIO extends Serializable, Closeable {
     // -------------------------------------------------------------------------
     //                            utils
     // -------------------------------------------------------------------------
-
+    // 删除操作不抛出异常，仅记录日志，常用于 finally 块清理临时文件。
     default void deleteQuietly(Path file) {
         if (LOG.isDebugEnabled()) {
             LOG.debug("Ready to delete " + file.toString());
@@ -308,6 +340,7 @@ public interface FileIO extends Serializable, Closeable {
     }
 
     /** Read file to UTF_8 decoding. */
+    // 快速读写小型的 UTF-8 文本文件（如元数据 JSON）
     default String readFileUtf8(Path path) throws IOException {
         try (SeekableInputStream in = newInputStream(path)) {
             BufferedReader reader =
@@ -327,6 +360,7 @@ public interface FileIO extends Serializable, Closeable {
      *
      * @return false if target file exists
      */
+    // 原子写操作。先写临时文件，成功后再重命名为目标文件。如果失败则清理临时文件。
     default boolean tryToWriteAtomic(Path path, String content) throws IOException {
         Path tmp = path.createTempPath();
         boolean success = false;
@@ -341,7 +375,7 @@ public interface FileIO extends Serializable, Closeable {
 
         return success;
     }
-
+    // 覆盖写入
     default void writeFile(Path path, String content, boolean overwrite) throws IOException {
         try (PositionOutputStream out = newOutputStream(path, overwrite)) {
             OutputStreamWriter writer = new OutputStreamWriter(out, StandardCharsets.UTF_8);

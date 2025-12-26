@@ -34,14 +34,21 @@ import java.util.List;
 import java.util.Map;
 
 /** Inner {@link TableScan} contains filter push down. */
+// InnerTableScan 的核心作用是实现 查询优化中的“谓词下推”（Filter Push Down）和“各种维度的裁剪”。
+// 在数据湖查询中，全表扫描是非常昂贵的。InnerTableScan 定义了一系列丰富的配置方法，允许查询引擎（如 Flink/Spark）将各种过滤条件（如分区过滤、主键范围过滤、桶过滤等）直接传递给扫描器。
+// 其主要价值体现为：
+//减少 I/O 消耗：在读取 Manifest 元数据阶段就过滤掉不符合条件的文件。
+//支持复杂查询：不仅支持简单的过滤，还支持 TopN 优化、向量搜索等高级功能。
+//流控与优化：支持限制读取行数（Limit）和忽略统计信息（Stats）以加速元数据处理。
+
 public interface InnerTableScan extends TableScan {
-
+    // 下推通用的谓词过滤（如 age > 18）。
     InnerTableScan withFilter(Predicate predicate);
-
+    // 支持向量检索下推，用于 AI/向量数据库场景。
     default InnerTableScan withVectorSearch(VectorSearch vectorSearch) {
         return this;
     }
-
+    // 指定读取的列结构（投影下推）。
     default InnerTableScan withReadType(@Nullable RowType readType) {
         return this;
     }
@@ -49,11 +56,11 @@ public interface InnerTableScan extends TableScan {
     default InnerTableScan withLimit(int limit) {
         return this;
     }
-
+    // 根据具体的分区键值对（如 day=20231001）过滤。
     default InnerTableScan withPartitionFilter(Map<String, String> partitionSpec) {
         return this;
     }
-
+    // 同时下推多个分区过滤条件（多分区查询）。
     default InnerTableScan withPartitionsFilter(List<Map<String, String>> partitions) {
         return this;
     }

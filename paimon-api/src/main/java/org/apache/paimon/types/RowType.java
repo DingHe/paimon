@@ -52,21 +52,29 @@ import java.util.stream.Collectors;
  *
  * @since 0.4.0
  */
+// RowType 代表了 SQL 中的 ROW（行）类型或结构体类型。它的主要作用包括：
+// 表结构描述：Paimon 表的每一行数据在逻辑上都是一个 RowType。它是所有列信息的容器。
+// 嵌套支持：RowType 内部可以包含其他 DataType，甚至是另一个 RowType，从而支持复杂的嵌套数据结构。
+// 投影与裁剪（Projection）：在查询时，用于描述“只读取哪几列”的行为，并生成对应窄表结构的新 RowType。
+// Schema 演进基石：通过 DataField 中的 ID（而非名称）来追踪列，使得 Paimon 能够支持重命名列、增删列等 Schema 变更。
 @Public
 public final class RowType extends DataType {
 
     private static final long serialVersionUID = 1L;
-
+    // 内部 JSON 序列化时使用的常量字段名 "fields"
     private static final String FIELD_FIELDS = "fields";
 
     public static final String FORMAT = "ROW<%s>";
-
+    // 核心属性。
+    // 一个不可变的 List<DataField>，存储了行中每一列的具体信息（包含 ID、名称、类型、描述）
     private final List<DataField> fields;
-
+    // 字段名到 DataField 对象的映射
     private transient volatile Map<String, DataField> laziedNameToField;
+    // 字段名到其在 List 中索引位置的映射
     private transient volatile Map<String, Integer> laziedNameToIndex;
-
+    // 字段 ID 到 DataField 对象的映射
     private transient volatile Map<Integer, DataField> laziedFieldIdToField;
+    // 字段 ID 到其在 List 中索引位置的映射。
     private transient volatile Map<Integer, Integer> laziedFieldIdToIndex;
 
     public RowType(boolean isNullable, List<DataField> fields) {
@@ -78,40 +86,40 @@ public final class RowType extends DataType {
 
         validateFields(fields);
     }
-
+    // 用于 JSON 反序列化的构造函数，默认 isNullable 为 true。
     @JsonCreator
     public RowType(@JsonProperty(FIELD_FIELDS) List<DataField> fields) {
         this(true, fields);
     }
-
+    // 根据新字段列表创建一个新的 RowType
     public RowType copy(List<DataField> newFields) {
         return new RowType(isNullable(), newFields);
     }
-
+    // 获取所有字段列表
     public List<DataField> getFields() {
         return fields;
     }
-
+    // 获取所有列名的列表
     public List<String> getFieldNames() {
         return fields.stream().map(DataField::name).collect(Collectors.toList());
     }
-
+    // 获取所有列类型的列表
     public List<DataType> getFieldTypes() {
         return fields.stream().map(DataField::type).collect(Collectors.toList());
     }
-
+    // 获取第 i 个位置的类型
     public DataType getTypeAt(int i) {
         return fields.get(i).type();
     }
-
+    // 获取总列数
     public int getFieldCount() {
         return fields.size();
     }
-
+    // 根据列名找索引（位置）
     public int getFieldIndex(String fieldName) {
         return nameToIndex().getOrDefault(fieldName, -1);
     }
-
+    // 批量将列名映射为位置索引数组
     public int[] getFieldIndices(List<String> projectFields) {
         int[] projection = new int[projectFields.size()];
         for (int i = 0; i < projection.length; i++) {
@@ -119,7 +127,7 @@ public final class RowType extends DataType {
         }
         return projection;
     }
-
+    // 检查是否包含某个列名或 ID
     public boolean containsField(String fieldName) {
         return nameToField().containsKey(fieldName);
     }
@@ -131,7 +139,7 @@ public final class RowType extends DataType {
     public boolean notContainsField(String fieldName) {
         return !containsField(fieldName);
     }
-
+    // 根据名称或 ID 获取 DataField 对象
     public DataField getField(String fieldName) {
         DataField field = nameToField().get(fieldName);
         if (field == null) {
@@ -160,13 +168,13 @@ public final class RowType extends DataType {
     public int defaultSize() {
         return fields.stream().mapToInt(f -> f.type().defaultSize()).sum();
     }
-
+    // 实现父类抽象方法，深拷贝并修改空值属性
     @Override
     public RowType copy(boolean isNullable) {
         return new RowType(
                 isNullable, fields.stream().map(DataField::copy).collect(Collectors.toList()));
     }
-
+    // 返回一个标记为 NOT NULL 的 RowType
     @Override
     public RowType notNull() {
         return copy(false);
@@ -178,7 +186,7 @@ public final class RowType extends DataType {
                 FORMAT,
                 fields.stream().map(DataField::asSQLString).collect(Collectors.joining(", ")));
     }
-
+    // 自定义 JSON 序列化逻辑
     @Override
     public void serializeJson(JsonGenerator generator) throws IOException {
         generator.writeStartObject();
@@ -205,7 +213,7 @@ public final class RowType extends DataType {
         RowType rowType = (RowType) o;
         return fields.equals(rowType.fields);
     }
-
+    // 比较两个 RowType 是否逻辑一致（名称和类型相同），但忽略物理 ID。
     @Override
     public boolean equalsIgnoreFieldId(DataType o) {
         if (this == o) {
@@ -228,7 +236,7 @@ public final class RowType extends DataType {
         }
         return true;
     }
-
+    // 判断当前行类型是否是目标对象的子集（通常用于检查读取的 Schema 是否是写入 Schema 的裁剪版）。
     @Override
     public boolean isPrunedFrom(Object o) {
         if (this == o) {
@@ -253,7 +261,7 @@ public final class RowType extends DataType {
     public int hashCode() {
         return Objects.hash(super.hashCode(), fields);
     }
-
+    // 核心校验。检查列名是否为空、是否有重复列名。
     private static void validateFields(List<DataField> fields) {
         final List<String> fieldNames =
                 fields.stream().map(DataField::name).collect(Collectors.toList());
@@ -273,7 +281,7 @@ public final class RowType extends DataType {
     public <R> R accept(DataTypeVisitor<R> visitor) {
         return visitor.visit(this);
     }
-
+    // 遍历整棵类型树，收集所有字段 ID，并校验是否存在重复 ID（Schema 损坏检查）。
     @Override
     public void collectFieldIds(Set<Integer> fieldIds) {
         for (DataField field : fields) {
@@ -285,14 +293,14 @@ public final class RowType extends DataType {
             field.type().collectFieldIds(fieldIds);
         }
     }
-
+    //根据给定的位置索引数组，裁剪出一个新的 RowType（常用于查询优化）。
     public RowType project(int[] mapping) {
         List<DataField> fields = getFields();
         return new RowType(
                         Arrays.stream(mapping).mapToObj(fields::get).collect(Collectors.toList()))
                 .copy(isNullable());
     }
-
+    // 根据给定的列名列表裁剪出新的 RowType
     public RowType project(List<String> names) {
         List<DataField> fields = getFields();
         List<String> fieldNames = fields.stream().map(DataField::name).collect(Collectors.toList());
@@ -302,7 +310,7 @@ public final class RowType extends DataType {
                                 .collect(Collectors.toList()))
                 .copy(isNullable());
     }
-
+    // 获取指定列名对应的索引数组
     public int[] projectIndexes(List<String> names) {
         List<String> fieldNames = fields.stream().map(DataField::name).collect(Collectors.toList());
         return names.stream().mapToInt(fieldNames::indexOf).toArray();

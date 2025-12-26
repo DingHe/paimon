@@ -38,6 +38,12 @@ import static org.apache.paimon.utils.SerializationUtils.newStringType;
  *
  * @since 0.9.0
  */
+// IndexFileMeta 类似于数据文件的“身份证”，其主要作用包括：
+// 多索引管理：Paimon 支持多种索引（如 Hash Index、BF Index、Deletion Vectors 等），该类用于区分和描述这些不同类型的索引文件。
+// 支持删除向量（Deletion Vectors）：这是 Paimon 近期版本引入的重要特性（v0.4+），用于在 Merge-on-Read 模式下快速标记已删除的行，该类记录了这些向量在文件中的偏移量和范围。
+// 全局索引描述：为 Primary Key 表提供全局层面的索引元数据。
+// 元数据检索：在 Snapshot 指向的 indexManifest 文件中，实际上存储的就是一系列 IndexFileMeta 记录。
+
 @Public
 public class IndexFileMeta {
 
@@ -45,14 +51,23 @@ public class IndexFileMeta {
             new RowType(
                     false,
                     Arrays.asList(
+                            // 索引类型。常见的包括：
+                            // HASH: 哈希索引，用于快速定位 Bucket。
+                            // DELETION_VECTORS: 删除向量，记录哪些行被删除了。
+
                             new DataField(0, "_INDEX_TYPE", newStringType(false)),
+                            // 索引文件的物理文件名（存储在文件系统中）
                             new DataField(1, "_FILE_NAME", newStringType(false)),
+                            // 索引文件的大小（字节）
                             new DataField(2, "_FILE_SIZE", new BigIntType(false)),
+                            // 索引文件中包含的记录条数
                             new DataField(3, "_ROW_COUNT", new BigIntType(false)),
+
                             new DataField(
                                     4,
                                     "_DELETIONS_VECTORS_RANGES",
                                     new ArrayType(true, DeletionVectorMeta.SCHEMA)),
+                            // 如果索引存储在表目录之外，记录其外部完整路径（可选）
                             new DataField(5, "_EXTERNAL_PATH", newStringType(true)),
                             new DataField(6, "_GLOBAL_INDEX", GlobalIndexMeta.SCHEMA)));
 

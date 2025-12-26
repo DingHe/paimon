@@ -69,15 +69,25 @@ import static org.apache.paimon.flink.utils.ParallelismUtils.forwardParallelism;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Abstract sink of paimon. */
+// Apache Paimon 的 FlinkSink<T> 类是一个抽象基类，它是 Paimon 与 Flink 集成的核心。
+// 它定义了如何将数据流写入 Paimon 表并最终提交（Commit）以生成快照（Snapshot）的标准流程。
+// FlinkSink 的核心作用是实现 Paimon 的两阶段提交（2PC）写入架构。
+// 在 Paimon 中，写入操作被分为两个主要阶段：
+// Write 阶段：多个并行算子（Writer）将数据写入临时文件，并生成 Committable（可提交信息）。
+// Commit 阶段：一个单并行度的算子（Global Committer）收集所有 Writer 产生的 Committable 信息，并将其原子性地提交到文件系统的 Manifest 文件中，从而生成一个新的快照，使数据对查询可见。
 public abstract class FlinkSink<T> implements Serializable {
 
     private static final long serialVersionUID = 1L;
-
+    // 写入算子的名称，
+    // 用于 Flink Web UI 显示
     private static final String WRITER_NAME = "Writer";
     private static final String WRITER_WRITE_ONLY_NAME = "Writer(write-only)";
     private static final String GLOBAL_COMMITTER_NAME = "Global Committer";
-
+    // 被写入的 Paimon 表对象。
+    // 它包含了表的 Schema、配置（CoreOptions）和底层的文件存储结构。
     protected final FileStoreTable table;
+    // 是否忽略之前的文件。
+    // 通常用于覆盖写（Overwrite）场景。
     private final boolean ignorePreviousFiles;
 
     public FlinkSink(FileStoreTable table, boolean ignorePreviousFiles) {

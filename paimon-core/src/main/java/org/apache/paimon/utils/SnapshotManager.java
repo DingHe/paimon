@@ -57,20 +57,30 @@ import static org.apache.paimon.utils.ThreadPoolUtils.createCachedThreadPool;
 import static org.apache.paimon.utils.ThreadPoolUtils.randomlyOnlyExecute;
 
 /** Manager for {@link Snapshot}, providing utility methods related to paths and snapshot hints. */
+// SnapshotManager 是一个核心工具类，负责快照（Snapshot）的生命周期管理、文件路径解析以及快照数据的检索。它连接了底层的存储系统（FileIO）与上层的逻辑查询。
+// 路径管理：定义和解析快照文件在文件系统中的存储位置（如 snapshot/snapshot-1）。
+// 数据加载：从文件系统中读取 JSON 格式的快照元数据并解析为 Snapshot 对象，同时提供本地缓存机制以提高性能。
+// 状态查询：提供寻找“最早快照”（Earliest）、“最新快照”（Latest）以及基于“时间戳”或“水位线（Watermark）”进行二分查找的能力。
+// 分支支持：支持 Paimon 的分支（Branch）功能，可以管理不同分支下的快照。
+// 并发安全处理：针对分布式环境下快照可能随时过期（Expired）的情况，提供了多种“安全扫描（Safely）”和“重试”机制。
 public class SnapshotManager implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
     private static final Logger LOG = LoggerFactory.getLogger(SnapshotManager.class);
-
+    // 静态常量，定义快照文件的前缀，默认为 "snapshot-"。
     public static final String SNAPSHOT_PREFIX = "snapshot-";
 
     public static final int EARLIEST_SNAPSHOT_DEFAULT_RETRY_NUM = 3;
-
+    // Paimon 抽象的文件操作接口，用于跨平台（HDFS/S3/本地）读写快照文件
     private final FileIO fileIO;
+    // 表的根目录。
     private final Path tablePath;
+    // 当前工作的分支名称。
     private final String branch;
+    // （可选）外部加载器，可能对接外部元数据服务或特定的加载逻辑。
     @Nullable private final SnapshotLoader snapshotLoader;
+    // 基于 Caffeine 的本地缓存，用于存储已解析的 Snapshot 对象，避免频繁 IO
     @Nullable private final Cache<Path, Snapshot> cache;
 
     public SnapshotManager(
@@ -105,22 +115,23 @@ public class SnapshotManager implements Serializable {
     public String branch() {
         return branch;
     }
-
+    // 根据 ID 拼接快照文件的完整路径（支持 Branch）
     public Path snapshotPath(long snapshotId) {
         return new Path(
                 branchPath(tablePath, branch) + "/snapshot/" + SNAPSHOT_PREFIX + snapshotId);
     }
-
+    // 获取存放快照的目录路径。
     public Path snapshotDirectory() {
         return new Path(branchPath(tablePath, branch) + "/snapshot");
     }
-
+    // 清空本地快照缓存。
     public void invalidateCache() {
         if (cache != null) {
             cache.invalidateAll();
         }
     }
-
+    // 获取指定 ID 的快照。
+    // 如果缓存没有，则通过 fromPath 从文件加载。
     public Snapshot snapshot(long snapshotId) {
         Path path = snapshotPath(snapshotId);
         Snapshot snapshot = cache == null ? null : cache.getIfPresent(path);
@@ -132,7 +143,7 @@ public class SnapshotManager implements Serializable {
         }
         return snapshot;
     }
-
+    // 尝试获取快照，若文件不存在则抛出
     public Snapshot tryGetSnapshot(long snapshotId) throws FileNotFoundException {
         Path path = snapshotPath(snapshotId);
         Snapshot snapshot = cache == null ? null : cache.getIfPresent(path);
@@ -144,7 +155,7 @@ public class SnapshotManager implements Serializable {
         }
         return snapshot;
     }
-
+    // 判断物理文件系统中是否存在该 ID 的快照。
     public boolean snapshotExists(long snapshotId) {
         Path path = snapshotPath(snapshotId);
         try {
@@ -155,7 +166,7 @@ public class SnapshotManager implements Serializable {
                     e);
         }
     }
-
+    // 从文件系统删除指定快照文件并失效缓存。
     public void deleteSnapshot(long snapshotId) {
         Path path = snapshotPath(snapshotId);
         if (cache != null) {
@@ -163,7 +174,7 @@ public class SnapshotManager implements Serializable {
         }
         fileIO().deleteQuietly(path);
     }
-
+    // 获取当前最新的快照。优先使用 snapshotLoader，否则扫描文件系统。
     public @Nullable Snapshot latestSnapshot() {
         Snapshot snapshot;
         if (snapshotLoader != null) {
@@ -209,7 +220,7 @@ public class SnapshotManager implements Serializable {
             throw new RuntimeException("Failed to find latest snapshot id", e);
         }
     }
-
+    // 获取当前最早的可用快照，包含自动重试逻辑（防止扫描瞬间快照正好过期）。
     public @Nullable Snapshot earliestSnapshot() {
         return earliestSnapshot(null);
     }
@@ -287,6 +298,7 @@ public class SnapshotManager implements Serializable {
      * Returns a {@link Snapshot} whose commit time is earlier than or equal to given timestamp
      * mills. If there is no such a snapshot, returns null.
      */
+    // 二分查找。返回提交时间早于或等于给定时间戳的最大快照。
     public @Nullable Snapshot earlierOrEqualTimeMills(long timestampMills) {
         Long latest = latestSnapshotId();
         if (latest == null) {
@@ -321,6 +333,7 @@ public class SnapshotManager implements Serializable {
      * Returns a {@link Snapshot} whoes commit time is later than or equal to given timestamp mills.
      * If there is no such a snapshot, returns null.
      */
+    // 返回提交时间晚于或等于给定时间戳的最小快照。
     public @Nullable Snapshot laterOrEqualTimeMills(long timestampMills) {
         Long earliest = earliestSnapshotId();
         Long latest = latestSnapshotId();
@@ -349,7 +362,7 @@ public class SnapshotManager implements Serializable {
         }
         return finalSnapshot;
     }
-
+    // 根据 Watermark 进行搜索，逻辑同上。
     public @Nullable Snapshot earlierOrEqualWatermark(long watermark) {
         Long latest = latestSnapshotId();
         // If latest == Long.MIN_VALUE don't need next binary search for watermark

@@ -27,6 +27,11 @@ import org.apache.paimon.annotation.Public;
  * @param <S> type of state
  * @since 0.4.0
  */
+// Restorable 是一个非常基础且关键的状态管理接口。它主要用于在流式处理或长时间运行的任务中，实现操作状态的保存与恢复。
+// 状态持久化支持：允许一个操作实例（如 TableScan 或某种算子）将其内部的中间状态导出（Checkpoint）。
+// 容错与连续性：在任务失败重启、或者在分布式作业中进行状态迁移时，通过恢复（Restore）之前的状态，确保任务可以从中断的地方继续运行，而不是从头开始。
+// 解耦实例与状态：通过泛型 <S>，它抽象了状态的具体表现形式，使得不同的组件可以根据需要定义自己的状态结构（如快照 ID、文件偏移量等）。
+
 @Public
 public interface Restorable<S> {
 

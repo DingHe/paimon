@@ -47,6 +47,7 @@ public interface BranchManager {
     }
 
     /** Return the path string of a branch. */
+    // 获取分支路径
     static String branchPath(Path tablePath, String branch) {
         return isMainBranch(branch)
                 ? tablePath.toString()

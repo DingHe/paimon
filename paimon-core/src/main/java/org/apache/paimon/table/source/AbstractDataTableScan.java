@@ -77,15 +77,25 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** An abstraction layer above {@link FileStoreScan} to provide input split generation. */
+// AbstractDataTableScan 的主要作用是屏蔽底层文件存储扫描的复杂性，并为数据表（Data Table）提供统一的切片（Split）规划逻辑。
+// 配置桥接：将用户在 CoreOptions 中设置的参数（如启动模式、过滤条件）转化为具体的扫描行为。
+// 启动策略分发：根据用户定义的 startup.mode（如 latest, from-timestamp 等），决定从哪个快照开始读取数据。
+// 谓词下推代理：它持有一个 SnapshotReader，所有的过滤条件（Filter/Partition/Bucket）都会委托给这个 Reader 去执行，以实现数据的物理裁剪。
+// 增量与流式支持：它内置了复杂的逻辑来处理批处理（Batch）增量读取和流式（Streaming）连续读取的起始位置计算。
+
 abstract class AbstractDataTableScan implements DataTableScan {
 
     private static final Logger LOG = LoggerFactory.getLogger(AbstractDataTableScan.class);
-
+    // 当前表的结构信息，用于解析字段和处理投影。
     protected final TableSchema schema;
+    // Paimon 核心配置项，决定了扫描的所有行为（如启动模式、消费者 ID 等）。
     private final CoreOptions options;
+    // 核心执行者。
+    // 负责读取特定的快照，并执行实际的文件过滤逻辑。
     protected final SnapshotReader snapshotReader;
+    // 查询权限验证器，用于在执行查询前校验用户是否有权访问特定的列。
     private final TableQueryAuth queryAuth;
-
+    // 用户实际需要读取的行类型（处理列裁剪后的 Schema）。
     @Nullable private RowType readType;
 
     protected AbstractDataTableScan(
@@ -98,7 +108,7 @@ abstract class AbstractDataTableScan implements DataTableScan {
         this.snapshotReader = snapshotReader;
         this.queryAuth = queryAuth;
     }
-
+    // 下推通用谓词。
     @Override
     public InnerTableScan withFilter(Predicate predicate) {
         snapshotReader.withFilter(predicate);
