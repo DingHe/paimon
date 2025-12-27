@@ -144,13 +144,22 @@ public class MergeTreeSplitGenerator implements SplitGenerator {
                                         : SplitGroup.nonRawConvertibleGroup(f))
                 .collect(Collectors.toList());
     }
-
+    // 负责在**流式读取（Streaming Read）**场景下，将一组新产生的增量数据文件（Incremental Files）转化为读取分片。
+    // files 是当前增量快照（Snapshot）中新产生的物理数据文件列表。
+    // 在流处理中，数据的处理是增量的（Incremental）。每次 Flink 任务发现一个新的快照时，通常只包含该 Checkpoint 周期内产生的一少量文件。
+    // 由于增量数据量通常较小，为了保证读取的有序性和简化状态管理，Paimon 选择将这批文件作为一个整体处理，而不是像批模式那样切分成多个 Split。
     @Override
     public List<SplitGroup> splitForStreaming(List<DataFileMeta> files) {
         // We don't split streaming scan files
+        // 在 Paimon 的流式消费逻辑中，如果一个增量快照包含了 Level 0 的文件（可能有重叠），
+        // Paimon 的 StreamingTableScan 会通过其他机制（如增量合并）处理。
+        // 在这里直接返回 rawConvertible 是因为流式 Reader（如 MergeTreeReader）在处理流式分片时，
+        // 会有专门的逻辑来处理这些增量文件的合并，或者这些文件本身就是 Compaction 后产生的有序文件
         return Collections.singletonList(SplitGroup.rawConvertibleGroup(files));
     }
-
+    // 将之前划分好的逻辑单元（Sections）根据大小限制，重新打包成物理上的分片（Splits）。
+    // 在 Paimon 中，一个 Section 内部的文件由于 Key 重叠必须在一起处理，但多个 Section 之间是互不重叠的。
+    // 为了提高读取效率，我们通常把几个小的 Section 合并成一个 Split。
     private List<List<DataFileMeta>> packSplits(List<List<DataFileMeta>> sections) {
         Function<List<DataFileMeta>, Long> weightFunc =
                 file -> Math.max(totalSize(file), openFileCost);

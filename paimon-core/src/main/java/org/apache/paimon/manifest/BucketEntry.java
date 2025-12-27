@@ -28,6 +28,11 @@ import java.util.Map;
 import java.util.Objects;
 
 /** Entry representing a bucket. */
+// BucketEntry 类是用于描述桶（Bucket）级别元数据统计信息的类。它是比 PartitionEntry 更细粒度的统计单元。
+// 在 Paimon 的存储架构中，一个分区（Partition）通常被划分为多个桶（Bucket）。BucketEntry 记录了特定分区下某个特定桶的汇总信息。
+// 精细化管理：Paimon 的数据读写和 Compaction 主要是以 Bucket 为最小单位进行的。了解每个 Bucket 的数据量和文件数，有助于触发更合理的 Compaction 策略。
+// 动态桶（Dynamic Bucket）支持：在动态桶模式下，系统需要监控每个桶的大小，以便决定是否需要新增桶。
+// 查询裁剪优化：虽然分区裁剪最常用，但在某些索引或过滤场景下，Bucket 级别的统计信息可以帮助更精确地估算数据分布。
 @Public
 public class BucketEntry {
 

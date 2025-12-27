@@ -251,15 +251,18 @@ public interface FileEntry {
                 manifestFiles,
                 manifestReadParallelism);
     }
-
+    // 主要目标是从给定的清单文件（Manifest Files）列表中，找出所有标记为“删除”状态的数据文件标识符（Identifier）
     static <T extends FileEntry> Set<Identifier> readDeletedEntries(
             Function<ManifestFileMeta, List<T>> manifestReader,
             List<ManifestFileMeta> manifestFiles,
             @Nullable Integer manifestReadParallelism) {
+        // 在真正读取文件内容前，先根据统计信息过滤掉不包含任何删除操作的清单文件。
         manifestFiles =
                 manifestFiles.stream()
                         .filter(file -> file.numDeletedFiles() > 0)
                         .collect(Collectors.toList());
+        // 定义了“如何从一个清单文件中提取出被删除文件的标识符”。
+        // 调用传入的读取函数，将清单文件从磁盘读入内存并解析成 FileEntry 列表。
         Function<ManifestFileMeta, List<Identifier>> processor =
                 file ->
                         manifestReader.apply(file).stream()
@@ -267,9 +270,11 @@ public interface FileEntry {
                                 .filter(e -> e.kind() == FileKind.DELETE)
                                 .map(FileEntry::identifier)
                                 .collect(Collectors.toList());
+        // 多线程并行执行
         Iterator<Identifier> identifiers =
                 randomlyExecuteSequentialReturn(processor, manifestFiles, manifestReadParallelism);
         Set<Identifier> result = ConcurrentHashMap.newKeySet();
+        // 将迭代器中的所有标识符收集到一个线程安全的 Set 集合中
         while (identifiers.hasNext()) {
             result.add(identifiers.next());
         }

@@ -19,6 +19,9 @@
 package org.apache.paimon.options.description;
 
 /** Part of a {@link Description} that can be converted into String representation. */
+// 描述内容的最小原子单元
+//Paimon 的配置选项（ConfigOption）通常需要详细的文档说明。为了支持不同的输出格式（例如：纯文本、Markdown 表格、HTML），
+// Paimon 没有直接将描述写死为固定字符串，而是设计了一套“描述系统”。
 interface DescriptionElement {
     /**
      * Transforms itself into String representation using given format.

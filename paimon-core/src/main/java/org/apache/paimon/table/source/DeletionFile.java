@@ -45,14 +45,23 @@ import java.util.Optional;
  *   <li>The remaining content should be a RoaringBitmap.
  * </ul>
  */
+// DeletionFile 类是实现 删除向量（Deletion Vectors） 技术的元数据载体。如果说“删除向量”是存储在磁盘上的位图数据，那么 DeletionFile 就是指向这些数据的“指针”或“索引”。
+// DeletionFile 的主要作用是描述删除向量数据在磁盘上的位置和特征。 它并不直接持有位图（Bitmap）的内容，而是记录了：
+// 去哪读：文件路径（path）。
+// 读哪里：文件内的起始偏移量（offset）和数据长度（length）。
+// 删了多少：被删除行的基数（cardinality）。
+// 在读取数据文件（Data File）时，Paimon 会根据关联的 DeletionFile 信息，从对应的位置加载 RoaringBitmap，从而过滤掉已删除的行。
 @Public
 public class DeletionFile implements Serializable {
 
     private static final long serialVersionUID = 1L;
-
+    // 存储删除向量的物理文件路径。多个数据文件的删除信息可能存储在同一个索引文件中。
     private final String path;
+    // 该数据文件对应的删除位图在文件中的起始字节位置。
     private final long offset;
+    // 删除位图数据的总字节长度。
     private final long length;
+    // 基数，即该文件中被标记为删除的总行数。这有助于优化查询计划（如判断是否值得使用索引）。
     @Nullable private final Long cardinality;
 
     public DeletionFile(String path, long offset, long length, @Nullable Long cardinality) {

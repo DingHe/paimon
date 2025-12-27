@@ -27,18 +27,41 @@ import java.util.Objects;
 import java.util.stream.Collectors;
 
 /** A simple {@link FileEntry} only contains identifier and min max key. */
+// SimpleFileEntry 的主要作用是 “轻量级的文件元数据载体”。
+// 在 Paimon 扫描清单（Manifest）时，标准的 ManifestEntry 包含了非常详细的列统计信息（如每一列的 Min/Max/Null Count）。虽然这些信息对过滤很有用，但它们会占用大量的内存。
+// SimpleFileEntry 剥离了那些繁重的列统计信息，仅保留了：
+//标识符信息：用于唯一确定一个文件（分区、桶、层级、文件名）。
+//核心范围信息：主键的最小值（minKey）和最大值（maxKey）。
+// 使用场景：
+//
+//当系统只需要进行文件级别的合并（Add 与 Delete 抵消）而不需要根据列统计信息进行谓词下推过滤时。
+//
+//在内存受限的情况下读取大量清单条目。
+//
+//用于构建文件的索引结构或进行简单的范围重叠判断。
 public class SimpleFileEntry implements FileEntry {
-
+    // 文件的动作类型，
+    // 分为 ADD（新增）或 DELETE（删除）。在 LSM 结构中，通过合并相同标识符的 ADD 和 DELETE 条目来确定文件的存在性。
     private final FileKind kind;
+    // 该文件所属的分区信息
     private final BinaryRow partition;
+    // 文件所在的桶（Bucket）编号
     private final int bucket;
+    // 写入该文件时表的总桶数（用于处理动态桶伸缩）
     private final int totalBuckets;
+    // 该文件所在的 LSM 树层级
     private final int level;
+    // 数据文件的名称（例如 data-xxx.orc 或 .parquet）
     private final String fileName;
+    // 与该数据文件关联的辅助文件（如外部索引文件）
     private final List<String> extraFiles;
+    // 嵌入在清单中的索引数据（可选），用于加速点查
     @Nullable private final byte[] embeddedIndex;
+    // 该文件中包含的所有记录中，主键的最小值
     private final BinaryRow minKey;
+    // 该文件中包含的所有记录中，主键的最大值
     private final BinaryRow maxKey;
+    // 如果文件存储在表路径之外（外部表），则记录其绝对路径
     @Nullable private final String externalPath;
 
     public SimpleFileEntry(

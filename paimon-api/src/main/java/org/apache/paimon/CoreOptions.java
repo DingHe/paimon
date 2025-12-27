@@ -3331,16 +3331,32 @@ public class CoreOptions implements Serializable {
     }
 
     /** Specifies the merge engine for table with primary key. */
+    // MergeEngine 是一个枚举类（Enum），它定义了 有主键（Primary Key）表 在数据合并时的核心逻辑。
+    // 定义主键冲突时的“生存法则”。
+    // 在 Paimon 的 LSM 树结构中，具有相同主键的多条数据可能会出现在不同的文件或不同的层级中。
+    // 当系统进行读取或合并（Compaction）时，MergeEngine 决定了如何处理这些主键相同但内容不同的数据行。
+    // 它是 Paimon 处理 CDC（数据变更捕获）数据 和 流式聚合 的灵魂配置。用户通过配置 merge-engine 参数来选择不同的实现。
     public enum MergeEngine implements DescribedEnum {
+        // 只保留最后一行
+        // 这是 Paimon 的默认引擎。当同一主键出现多次时，后到的数据会覆盖旧数据，适用于简单的镜像同步。
         DEDUPLICATE("deduplicate", "De-duplicate and keep the last row."),
-
+        // 部分更新
+        // 非空字段更新
+        // 场景：适用于多个数据源汇聚到一张表的场景。
+        // 例如，数据源 A 只提供用户的姓名，数据源 B 只提供用户的年龄。Paimon 会根据主键将这些来自不同流的非空字段拼成一行完整数据。
         PARTIAL_UPDATE("partial-update", "Partial update non-null fields."),
-
+        // 聚合
+        // 对字段进行函数聚合
+        // 通过配置 fields.<field-name>.aggregate-function（如 sum, max, min 等），将相同主键的数据进行增量计算。
+        // 非常适合实时报表统计。
         AGGREGATE("aggregation", "Aggregate fields with same primary key."),
-
+        // 只保留第一行，忽略后续更改。
+        // 适用于“一旦生成永不更改”的数据，如日志记录或首次获客记录。
+        // 它的优势在于性能极高，因为一旦发现了主键对应的第一行，后续的扫描可以直接跳过重叠的 Key 范围。
         FIRST_ROW("first-row", "De-duplicate and keep the first row.");
-
+        // 该引擎在配置项中对应的 字符串值（例如 "deduplicate"），用于在用户设置 table.conf 时进行匹配。
         private final String value;
+        // 该引擎的 功能描述文字，用于自动生成文档，解释该合并策略的具体行为。
         private final String description;
 
         MergeEngine(String value, String description) {
@@ -3533,18 +3549,33 @@ public class CoreOptions implements Serializable {
     }
 
     /** Specifies the changelog producer for table. */
+    // 定义了变更日志（Changelog）生成策略。
+    // ChangelogProducer 决定了 Paimon 表如何产生用于下游流式消费的变更数据（包含 INSERT、UPDATE_BEFORE、UPDATE_AFTER、DELETE 等类型）。
+    // 在流计算中，下游（如 Flink 的聚合任务）往往需要完整的变更序列来保证计算正确性。如果 Paimon 表收到的数据只有“最后的状态”，
+    // 那么它就需要通过某种机制“生产”出这些变更。这个枚举类就是用来配置这些生成机制的。
     public enum ChangelogProducer implements DescribedEnum {
+        // 不生成单独的 Changelog 文件
+        // 当你从该表进行流式读取时，系统只能观察到 Snapshot（快照）的变化。
+        // 对于 LSM 树来说，这意味着只能获取到新增的文件，无法提供准确的 UPDATE 数据（因为没有 UPDATE_BEFORE 记录）。
+        // 适用场景：只增不减的数据（Append-only），或者对数据更新的中间过程不敏感的场景。
         NONE("none", "No changelog file."),
-
+        // 在内存表（MemTable）刷写到磁盘时，将输入的数据直接同步双写到 Changelog 文件。
+        // 解读：系统不对输入数据做任何处理，直接透传。
+        // 适用场景：如果上游数据源本身已经包含了完整的变更信息（比如上游是 MySQL CDC 或者是另一个完整的 Flink Changelog 流），这种方式效率最高。
         INPUT(
                 "input",
                 "Double write to a changelog file when flushing memory table, the changelog is from input."),
-
+        // 在每次执行 全量合并（Full Compaction） 时生成 Changelog 文件。
+        // 解读：Paimon 会对比两次全量合并之间的数据差异，从而计算出 UPDATE_BEFORE 和 UPDATE_AFTER。
+        // 适用场景：如果你无法从输入端获取完整变更，且可以接受较低的 Changelog 产出频率（因为 Full Compaction 比较重）。
         FULL_COMPACTION("full-compaction", "Generate changelog files with each full compaction."),
-
+        // 通过 Lookup（点查） 机制在 Compaction 过程中生成 Changelog 文件。
+        // 解读：在数据合并时，Paimon 会去查找该主键对应的旧值。如果发现该记录已存在，则自动生成一条 UPDATE_BEFORE 记录。
+        // 适用场景：这是目前最推荐、也是最常用的实现精准 Changelog 的方式。它能提供低延迟、高一致性的变更流，适合需要实时消费变更数据的场景。
         LOOKUP("lookup", "Generate changelog files through 'lookup' compaction.");
-
+        // value (String): 枚举项在配置项中对应的字符串值（如 "none", "input"）。
         private final String value;
+        // description (String): 对该枚举项的功能描述，用于生成文档或提示信息。
         private final String description;
 
         ChangelogProducer(String value, String description) {

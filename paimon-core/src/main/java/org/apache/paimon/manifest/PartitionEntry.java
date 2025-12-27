@@ -35,13 +35,24 @@ import static org.apache.paimon.manifest.FileKind.ADD;
 import static org.apache.paimon.manifest.FileKind.DELETE;
 
 /** Entry representing a partition. */
+// 描述分区级别元数据统计信息的核心类
+// 在 Paimon 中，一个表由许多分区组成，每个分区下又包含大量的清单文件（Manifests）和数据文件。如果每次查询都要扫描所有文件来获取表的规模，效率会极低。
+// PartitionEntry 记录了一个分区当前的“健康状况”和“物理规模”，包括数据量、文件数和最后更新时间。它主要用于
+// 元数据管理：在快照（Snapshot）中维护每个分区的聚合统计信息。
+// 查询优化：帮助优化器了解各分区的数据分布，进行代价评估。
+// 分区清理：通过 lastFileCreationTime 判断分区的生命周期。
 @Public
 public class PartitionEntry {
-
+    // 分区的标识符。存储分区的实际值（二进制格式）。
     private final BinaryRow partition;
+    // 记录总数。该分区内包含的行（Row）总数。
     private final long recordCount;
+    // 物理大小。
+    // 该分区下所有数据文件的总字节数。
     private final long fileSizeInBytes;
+    // 文件数量。该分区包含的数据文件个数。
     private final long fileCount;
+    // 最后修改时间。记录该分区中最新文件的创建时间戳（毫秒）。
     private final long lastFileCreationTime;
 
     public PartitionEntry(
@@ -76,7 +87,8 @@ public class PartitionEntry {
     public long lastFileCreationTime() {
         return lastFileCreationTime;
     }
-
+    // 将另一个 PartitionEntry 合并到当前条目中。
+    // 它通过简单的加法（计数和大小）以及取最大值（最后创建时间）来生成一个新的条目。
     public PartitionEntry merge(PartitionEntry entry) {
         return new PartitionEntry(
                 partition,
@@ -85,7 +97,7 @@ public class PartitionEntry {
                 fileCount + entry.fileCount,
                 Math.max(lastFileCreationTime, entry.lastFileCreationTime));
     }
-
+    // 将内部的二进制 BinaryRow 转换为用户可读的 Partition 对象
     public Partition toPartition(InternalRowPartitionComputer computer) {
         return new Partition(
                 computer.generatePartValues(partition),
@@ -95,7 +107,7 @@ public class PartitionEntry {
                 lastFileCreationTime,
                 false);
     }
-
+    // 转换为专门用于统计目的的 PartitionStatistics 对象。
     public PartitionStatistics toPartitionStatistics(InternalRowPartitionComputer computer) {
         return new PartitionStatistics(
                 computer.generatePartValues(partition),
@@ -104,7 +116,10 @@ public class PartitionEntry {
                 fileCount,
                 lastFileCreationTime);
     }
-
+    // 最核心的逻辑之一。根据文件的操作类型（ADD 或 DELETE）来计算权重：
+    //如果是 ADD：增加记录数、文件大小和文件数。
+    //如果是 DELETE：减去对应的记录数、文件大小和文件数。
+    //这实现了增量更新统计信息的功能。
     public static PartitionEntry fromManifestEntry(ManifestEntry entry) {
         return fromDataFile(entry.partition(), entry.kind(), entry.file());
     }
@@ -122,7 +137,7 @@ public class PartitionEntry {
         return new PartitionEntry(
                 partition, recordCount, fileSizeInBytes, fileCount, file.creationTimeEpochMillis());
     }
-
+    // 将一组清单条目按分区进行分组汇总
     public static Collection<PartitionEntry> merge(Collection<ManifestEntry> fileEntries) {
         Map<BinaryRow, PartitionEntry> partitions = new HashMap<>();
         for (ManifestEntry entry : fileEntries) {
@@ -133,7 +148,7 @@ public class PartitionEntry {
         }
         return partitions.values();
     }
-
+    // 在扫描（Scan）过程中，将查询分片（Split）的信息汇总。注意这里会忽略 DELETE 类型的文件，因为读取代价较高。
     public static Collection<PartitionEntry> mergeSplits(Collection<DataSplit> splits) {
         Map<BinaryRow, PartitionEntry> partitions = new HashMap<>();
         for (DataSplit split : splits) {

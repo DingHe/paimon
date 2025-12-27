@@ -53,27 +53,45 @@ import static org.apache.paimon.CoreOptions.MergeEngine.AGGREGATE;
 import static org.apache.paimon.CoreOptions.MergeEngine.PARTIAL_UPDATE;
 
 /** {@link FileStoreScan} for {@link KeyValueFileStore}. */
+// KeyValueFileStoreScan 是专门为 有主键表（Primary Key Table） 或 KeyValue 格式表 设计的数据扫描处理器。
+// 它继承自 AbstractFileStoreScan，并实现了针对 Key 和 Value 双重过滤的高级逻辑。
+// 该类的主要职责是 “在元数据层面进行数据裁剪”。
+// 在 LSM 树结构的 KeyValue 存储中，数据不仅按分区和桶拆分，还存在多个层级（Level）。KeyValueFileStoreScan 的作用包括：
+// 双重裁剪：同时支持对主键（Key）和值列（Value）的统计信息（Min/Max）进行过滤。
+// Schema 演变支持：处理在表结构发生变化（如增加列）后，旧文件与新谓词之间的兼容性转换。
+// 桶级优化：在有主键表中，由于相同 Key 的数据可能分布在不同层级的文件中，它负责以“桶”为单位进行整体过滤判断。
+// 集成高级索引：利用文件内嵌入的索引（File Index）进一步加速过滤。
 public class KeyValueFileStoreScan extends AbstractFileStoreScan {
-
+    // 处理主键列统计信息的演变。当 Schema 改变时，确保旧文件的 Key 统计信息能正确转换。
     private final SimpleStatsEvolutions fieldKeyStatsConverters;
+    // 处理值列统计信息的演变。
     private final SimpleStatsEvolutions fieldValueStatsConverters;
+    // 将 Key 上的过滤条件转换为对特定桶（Bucket）的过滤，实现桶裁剪。
     private final BucketSelectConverter bucketSelectConverter;
+    // 是否启用删除向量（Deletion Vectors）。这会影响合并引擎如何处理数据。
     private final boolean deletionVectorsEnabled;
+    // 合并引擎类型（如 DEDUPLICATE, PARTIAL_UPDATE, AGGREGATE）
     private final MergeEngine mergeEngine;
+    // Changelog 生成机制
     private final ChangelogProducer changelogProducer;
+    // 是否允许读取并利用文件索引进行过滤
     private final boolean fileIndexReadEnabled;
-
+    // 针对主键列的过滤谓词。
     private Predicate keyFilter;
+    // 针对值列（非主键列）的过滤谓词
     private Predicate valueFilter;
+    // 强制开启 Value 过滤的标记（通常用于全量扫描）
     private boolean valueFilterForceEnabled = false;
 
     // cache not evolved filter by schema id
+    // 缓存不同 Schema ID 下对应的过滤器。避免为清单中的每个文件重复生成过滤器对象。
     private final Map<Long, Predicate> notEvolvedKeyFilterMapping = new ConcurrentHashMap<>();
 
     // cache not evolved filter by schema id
     private final Map<Long, Predicate> notEvolvedValueFilterMapping = new ConcurrentHashMap<>();
 
     // cache evolved filter by schema id
+    // 专门用于文件索引的过滤器缓存
     private final Map<Long, Predicate> evolvedValueFilterMapping = new ConcurrentHashMap<>();
 
     public KeyValueFileStoreScan(
