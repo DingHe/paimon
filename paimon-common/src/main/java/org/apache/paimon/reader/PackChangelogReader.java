@@ -27,6 +27,12 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.function.BiFunction;
+// PackChangelogReader 的主要作用是 “打包（Pack）” 更新消息。
+// 在 CDC（数据变更捕获）或 Flink 流处理中，一个“更新”操作通常由两条连续的记录组成：
+//UPDATE_BEFORE (-U)：更新前的数据镜像。
+//UPDATE_AFTER (+U)：更新后的新数据。
+//该读取器通过包装一个底层的 RecordReader，扫描数据流。当它发现一个 UPDATE_BEFORE 记录时，它会自动寻找紧随其后的下一条记录，并将这两者通过一个自定义函数（BiFunction）合并为一条记录输出。这在需要将变更流转换为特定的聚合格式或同步到不支持原生 Changelog 的系统时非常有用。
+
 
 /** The reader which will pack the update before and update after message together. */
 public class PackChangelogReader implements RecordReader<InternalRow> {

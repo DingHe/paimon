@@ -39,17 +39,30 @@ import static org.apache.paimon.table.SpecialFields.VALUE_KIND;
  * A key value, including user key, sequence number, value kind and value. This object can be
  * reused.
  */
+// KeyValue 类是 LSM 树（Log-Structured Merge-tree）存储引擎处理数据的最核心抽象单元。
+// KeyValue 类代表了 Paimon 内部的一条“键值对”记录。它不仅包含了用户定义的业务数据，还封装了 Paimon 管理数据版本、合并逻辑以及 LSM 树层级所需的元数据。
+// 在 Paimon 的 KeyValue 存储格式中，任何一条写入或读取的数据都会被包装成这个对象。它的设计目标是高性能和可复用性（对象可以被多次替换内容，以减少内存分配和垃圾回收压力）。
+
+
 public class KeyValue {
-
+    // 常量（-1）。表示序列号尚未确定。
     public static final long UNKNOWN_SEQUENCE = -1;
+    // 常量（-1）。表示层级尚未确定。
     public static final int UNKNOWN_LEVEL = -1;
-
+    // 业务主键。对应用户在 DDL 中定义的 PRIMARY KEY 字段。
     private InternalRow key;
     // determined after written into memory table or read from file
+    // 序列号。
+    // 由 Paimon 自动生成，代表数据的写入顺序。用于在合并时确定哪条数据是“最新的”（Sequence Number 越大，数据越新）。
     private long sequenceNumber;
+    // 操作类型。
+    // 表示这条记录是新增（+I）、更新（+U/-U）还是删除（-D）。
     private RowKind valueKind;
+    // 业务数据值。对应用户表中除去主键以外的其他所有列。
     private InternalRow value;
     // determined after read from file
+    // LSM 层级。
+    // 记录该记录当前处于 LSM 树的第几层（Level 0 到 Level N）。通常在从文件读取后确定。
     private int level;
 
     public KeyValue replace(InternalRow key, RowKind valueKind, InternalRow value) {

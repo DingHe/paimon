@@ -3638,9 +3638,22 @@ public class CoreOptions implements Serializable {
     }
 
     /** Inner stream scan mode for some internal requirements. */
+    // 主要用于定义流式扫描（Streaming Scan）的特殊运行模式。
+    // 它不像普通的用户级扫描设置，而是为了满足 Paimon 内部一些特定的功能组件（如自动压缩、文件监控等）而设计的行为指示器
+    // 在 Paimon 的流式读取（Continuous Reading）中，扫描器（Scanner）需要不断地检查新的快照（Snapshot）和清单（Manifest）。不同的内部任务对“扫描”的要求不同：
+    // 普通读取：关心数据的新增。
+    // 压缩任务（Compaction）：关心哪些桶（Bucket）需要合并。
+    // 监控任务：只关心文件的物理变更。
     public enum StreamScanMode implements DescribedEnum {
+        // 默认模式。表示没有特殊的内部要求。
+        // 通常用于标准的流式数据消费（如 Flink 的 SELECT * FROM table 流读取）。
         NONE("none", "No requirement."),
+        // 传统桶表的压缩模式。
+        // 专门用于 Paimon 的后台压缩作业。
+        // 在该模式下，扫描器会重点识别那些由于持续写入而导致文件过多、需要进行合并（Compaction）的桶，以便调度压缩任务。
         COMPACT_BUCKET_TABLE("compact-bucket-table", "Compaction for traditional bucket table."),
+        // 文件监控模式。
+        // 在这种模式下，扫描器不关注数据行本身的变化逻辑（如合并或去重），而是单纯地监控物理数据文件的变化。这常用于一些底层的索引构建或文件系统同步工具。
         FILE_MONITOR("file-monitor", "Monitor data file changes.");
 
         private final String value;
@@ -3784,8 +3797,16 @@ public class CoreOptions implements Serializable {
                     .collect(Collectors.toSet());
 
     /** Specifies the sort engine for table with primary key. */
+    // 用于指定有主键表（Primary Key Table）在进行 多路归并排序（Multiway Merging） 时所使用的底层算法引擎。
+    // 在 Paimon 的 LSM 树结构中，读取数据或进行压缩（Compaction）时，需要将多个有序的文件（Runs）合并成一个更大的有序序列。这是一个经典的“多路归并”问题。
+    // SortEngine 允许用户根据实际的硬件环境和性能需求，选择不同的数据结构来维护归并过程中的有序状态。
     public enum SortEngine implements DescribedEnum {
+        // 最小堆
+        // 使用最小堆（通常是二叉堆）进行多路归并。
+        // 在 $k$ 路归并中，建立一个大小为 $k$ 的最小堆。每次从堆顶取出最小元素，然后将该元素所在序列的下一个元素插入堆中并重新调整堆。
         MIN_HEAP("min-heap", "Use min-heap for multiway sorting."),
+        // 败者树
+        // 败者树是对树形选择排序的一种改进。在每个非叶子节点中记录“败者”（值较大的节点），而让“胜者”（值较小的节点）继续向上竞争。
         LOSER_TREE(
                 "loser-tree",
                 "Use loser-tree for multiway sorting. Compared with heapsort, loser-tree has fewer comparisons and is more efficient.");

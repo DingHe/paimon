@@ -35,6 +35,8 @@ import java.util.Map;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Return value with score. */
+// 在 Apache Paimon 的全局索引（Global Index）体系中，IndexedSplitRecordReader 是一个特殊的装饰器类读取器。
+// 它主要用于支持 向量搜索（Vector Search） 或带有 评分（Score） 机制的检索场景。
 public class IndexedSplitRecordReader implements RecordReader<InternalRow> {
 
     private final RecordReader<InternalRow> reader;

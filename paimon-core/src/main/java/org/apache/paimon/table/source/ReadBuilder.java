@@ -73,13 +73,22 @@ import java.util.Map;
  *
  * @since 0.4.0
  */
+// 在 Apache Paimon 中，ReadBuilder 是数据读取入口最核心的接口。
+// 它采用了 构建者模式（Builder Pattern），负责收集用户所有的读取需求（如过滤条件、投影列、启动模式等），并最终生成执行读取任务的对象。
+// 在分布式计算（如 Flink、Spark 或 Presto）中，读取通常分为两个阶段：
+// 计划阶段（Planning）：在 Coordinator/Driver 端运行。通过 newScan() 生成任务切片（Splits）。
+// 执行阶段（Execution）：在 Worker/Executor 端运行。通过 newRead() 真正读取分片数据。
+// ReadBuilder 是连接 Paimon 存储和计算引擎的“契约”。它确保了无论是在 Driver 端的任务拆分，还是在 Worker 端的数据读取，都能遵循同一套逻辑（如分区裁剪、列裁剪、谓词下推）
 @Public
 public interface ReadBuilder extends Serializable {
 
     /** A name to identify the table. */
+    // 返回表的名称，用于标识当前正在读取的表。
     String tableName();
 
     /** Returns read row type. */
+    // 返回最终读取结果的行类型（RowType）。
+    // 这是经过投影（Projection）或剪裁后的类型。
     RowType readType();
 
     /**
@@ -99,6 +108,7 @@ public interface ReadBuilder extends Serializable {
      * Push filters, will filter the data as much as possible, but it is not guaranteed that it is a
      * complete filter.
      */
+    // 将过滤谓词下推到读取器。
     ReadBuilder withFilter(Predicate predicate);
 
     /** Push partition filter. */
@@ -106,7 +116,7 @@ public interface ReadBuilder extends Serializable {
 
     /** Push partition filters. */
     ReadBuilder withPartitionFilter(PartitionPredicate partitionPredicate);
-
+    // 显式指定只读取某一个特定的 Bucket。
     ReadBuilder withBucket(int bucket);
 
     /**
@@ -125,6 +135,8 @@ public interface ReadBuilder extends Serializable {
      * @param readType read row type
      * @since 1.0.0
      */
+    // 核心方法。显式指定读取的列结构。
+    // 它不仅支持列裁剪，还支持 嵌套列裁剪（Nested Row Pruning），例如只读取 JSON 结构中的某个字段
     ReadBuilder withReadType(RowType readType);
 
     /**
@@ -139,6 +151,7 @@ public interface ReadBuilder extends Serializable {
      * Apply projection to the reader, if you need nested row pruning, use {@link
      * #withReadType(RowType)} instead.
      */
+    // 指定读取的列索引数组。例如 [0, 2] 表示只读第 0 和第 2 列。
     ReadBuilder withProjection(int[] projection);
 
     /** the row number pushed down. */
@@ -173,17 +186,24 @@ public interface ReadBuilder extends Serializable {
      *
      * @param vectorSearch
      */
+    // 支持向量搜索下推，常用于 AI 向量数据库场景。
     ReadBuilder withVectorSearch(VectorSearch vectorSearch);
 
     /** Delete stats in scan plan result. */
     ReadBuilder dropStats();
 
     /** Create a {@link TableScan} to perform batch planning. */
+    // 生成一个用于 批处理（Batch） 的扫描器。
+    // 它会一次性列出当前快照的所有文件切片。
     TableScan newScan();
 
     /** Create a {@link TableScan} to perform streaming planning. */
+    // 生成一个用于 流处理（Streaming） 的扫描器（如前几轮讨论的 DataTableStreamScan）。
+    // 它会持续监听新快照。
     StreamTableScan newStreamScan();
 
     /** Create a {@link TableRead} to read {@link Split}s. */
+    // 生成 TableRead 对象。
+    // 这是 Worker 端真正执行 IO 的类，负责打开物理文件并返回 InternalRow。
     TableRead newRead();
 }

@@ -558,7 +558,11 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
             return this;
         }
     }
-
+    // 采用了 装饰器模式 (Decorator Pattern) 的内部类。
+    // 它通过包装一个标准的流式扫描对象，专门用于支持审计日志（Audit Log）系统表的流式读取。
+    // 当用户通过 SELECT * FROM my_table$audit_log 进行流式查询时，底层依然需要一套流式发现增量快照的逻辑。这个类通过包装真实的 DataTableStreamScan，
+    // 在保持所有流式状态（Checkpoint、Restore、Watermark）同步的同时，提供了一个关键的转换层：
+    // 谓词转换（Predicate Conversion）：这是该类存在的最大意义。审计日志系统表包含一些特殊的元数据列（如 rowkind 表示数据行类型）。当用户在审计日志表上应用过滤条件（如 WHERE rowkind = '+I'）时，该类负责将针对审计日志表的过滤谓词转换为底层原始数据表能够识别的谓词。
     private class AuditLogStreamScan implements StreamDataTableScan {
 
         private final StreamDataTableScan streamScan;

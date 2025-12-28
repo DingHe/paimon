@@ -36,14 +36,20 @@ import java.util.List;
  *
  * <p>NOTE: {@link KeyValue}s from the same {@link RecordReader} must not contain the same key.
  */
+// 在 Apache Paimon 的核心存储引擎中，SortMergeReader 是实现 Merge-on-Read (读时合并) 机制的核心组件。
+// 它位于 LSM-Tree 结构之上，负责将来自不同层级、不同文件的有序数据流合并为一个统一、正确的结果流。
+// 在 Paimon 的主键表中，由于数据是不断 Append 的，同一个主键（Key）可能存在于多个不同的数据文件中（例如：一个在 Base 文件里，另一个在增量 Delta 文件里）。 该类的核心职责包括：
+// 多路归并：同时读取多个已经按 Key 排序的 RecordReader。
+// 版本去重/合并：当发现多个 Reader 输出相同的 Key 时，根据 Sequence Number（序列号）判断先后顺序。
+// 函数转换：利用 MergeFunction 处理相同 Key 的数据（如保留最新的一行 Deduplicate，或是进行部分列更新 PartialUpdate）。
 public interface SortMergeReader<T> extends RecordReader<T> {
-
+    // 根据用户的配置和硬件特性，选择最适合的归并引擎。
     static <T> SortMergeReader<T> createSortMergeReader(
-            List<RecordReader<KeyValue>> readers,
-            Comparator<InternalRow> userKeyComparator,
-            @Nullable FieldsComparator userDefinedSeqComparator,
-            MergeFunctionWrapper<T> mergeFunctionWrapper,
-            SortEngine sortEngine) {
+            List<RecordReader<KeyValue>> readers, // 待合并的输入流列表。注意项：正如类注释所言，每一个单独的 Reader 内部必须是按 Key 有序的，且同一个 Reader 内部不能有重复的 Key。
+            Comparator<InternalRow> userKeyComparator, // 用户主键比较器。用于判断不同数据行是否属于同一个 Key。
+            @Nullable FieldsComparator userDefinedSeqComparator, // 用户定义的序列号比较器。当 Key 相同时，系统依靠它来决定哪条数据更“新”或者优先级更高。
+            MergeFunctionWrapper<T> mergeFunctionWrapper, // 合并逻辑的包装器。它定义了当 Key 冲突时，是采取“去重（Deduplicate）”、“聚合（Aggregation）”还是“覆盖（Overwrite）”操作。
+            SortEngine sortEngine) { // 排序引擎类型。决定底层使用哪种数据结构进行多路找最小值。
         switch (sortEngine) {
             case MIN_HEAP:
                 return new SortMergeReaderWithMinHeap<>(

@@ -202,22 +202,31 @@ abstract class AbstractDataTableScan implements DataTableScan {
     public CoreOptions options() {
         return options;
     }
-
+    // 核心作用是根据用户配置的启动模式（Startup Mode），决定作业启动时从哪个快照（Snapshot）开始读，以及采用何种读取策略。
     protected StartingScanner createStartingScanner(boolean isStreaming) {
+        // 获取快照管理器和变更日志管理器；
+        // 从配置中读取当前的流扫描模式。
         SnapshotManager snapshotManager = snapshotReader.snapshotManager();
         ChangelogManager changelogManager = snapshotReader.changelogManager();
         CoreOptions.StreamScanMode type =
                 options.toConfiguration().get(CoreOptions.STREAM_SCAN_MODE);
+        // 处理 Paimon 特有的后台任务扫描。
         switch (type) {
+            // 专用于流式压缩任务，仅在流模式下工作。
             case COMPACT_BUCKET_TABLE:
                 checkArgument(
                         isStreaming, "Set 'streaming-compact' in batch mode. This is unexpected.");
                 return new ContinuousCompactorStartingScanner(snapshotManager);
+                // 类似传统文件监控，从全量开始。
             case FILE_MONITOR:
                 return new FullStartingScanner(snapshotManager);
         }
 
         // read from consumer id
+        // 处理消费者 ID（Consumer ID）逻辑
+        // 支持断点续传。
+        // 如果配置了 consumer-id，Paimon 会去元数据中查找该消费者上一次读到的位置。
+        // 如果找到了，就忽略其他启动设置，直接从 nextSnapshot 继续读。
         String consumerId = options.consumerId();
         if (isStreaming && consumerId != null && !options.consumerIgnoreProgress()) {
             ConsumerManager consumerManager = snapshotReader.consumerManager();
@@ -230,15 +239,20 @@ abstract class AbstractDataTableScan implements DataTableScan {
                         options.changelogLifecycleDecoupled());
             }
         }
-
+        // 根据 scan.startup.mode 的不同取值返回对应的 Scanner。
         CoreOptions.StartupMode startupMode = options.startupMode();
         switch (startupMode) {
+            // 读当前最新的全量快照。
             case LATEST_FULL:
                 return new FullStartingScanner(snapshotManager);
+            // LATEST：如果是流读，则只读启动后产生的新数据（不读历史）；
+            // 如果是批读，则退化为读当前最新快照。
             case LATEST:
                 return isStreaming
                         ? new ContinuousLatestStartingScanner(snapshotManager)
                         : new FullStartingScanner(snapshotManager);
+            // 读取压缩后的全量
+            // 为了提高效率，只读取经过 Full Compaction 后的文件，减少小文件读取。
             case COMPACTED_FULL:
                 if (options.changelogProducer() == ChangelogProducer.FULL_COMPACTION
                         || options.toConfiguration().contains(FULL_COMPACTION_DELTA_COMMITS)) {
@@ -250,6 +264,8 @@ abstract class AbstractDataTableScan implements DataTableScan {
                 } else {
                     return new CompactedStartingScanner(snapshotManager);
                 }
+            // 按时间戳启动
+            // 找到早于或等于指定时间戳的快照并开始读取。
             case FROM_TIMESTAMP:
                 String timestampStr = options.scanTimestamp();
                 Long startupMillis = options.scanTimestampMills();
@@ -265,6 +281,7 @@ abstract class AbstractDataTableScan implements DataTableScan {
                                 startupMillis,
                                 options.changelogLifecycleDecoupled())
                         : new StaticFromTimestampStartingScanner(snapshotManager, startupMillis);
+
             case FROM_FILE_CREATION_TIME:
                 Long fileCreationTimeMills = options.scanFileCreationTimeMills();
                 return new FileCreationTimeStartingScanner(snapshotManager, fileCreationTimeMills);
@@ -276,7 +293,8 @@ abstract class AbstractDataTableScan implements DataTableScan {
                         creationTimeMills,
                         options.changelogLifecycleDecoupled(),
                         isStreaming);
-
+            // 按快照 ID 启动
+            // 支持精确指定从某个 snapshot-id、watermark 或 tag 启动。注意：Tag 和 Watermark 扫描目前仅支持批模式。
             case FROM_SNAPSHOT:
                 if (options.scanSnapshotId() != null) {
                     return isStreaming
@@ -307,6 +325,8 @@ abstract class AbstractDataTableScan implements DataTableScan {
                         ? new ContinuousFromSnapshotFullStartingScanner(
                                 snapshotManager, scanSnapshotId)
                         : new StaticFromSnapshotStartingScanner(snapshotManager, scanSnapshotId);
+            // 增量模式
+            // 专门用于批处理中读取两个快照之间的差异（Incremental Diff）
             case INCREMENTAL:
                 checkArgument(!isStreaming, "Cannot read incremental in streaming mode.");
                 return createIncrementalStartingScanner(snapshotManager);

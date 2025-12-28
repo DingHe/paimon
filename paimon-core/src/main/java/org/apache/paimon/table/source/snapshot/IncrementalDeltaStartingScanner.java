@@ -52,12 +52,19 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 /**
  * Get incremental data by reading delta or changelog files from snapshots between start and end.
  */
+// IncrementalDeltaStartingScanner 是一个专门用于获取两个快照之间增量数据的启动器。它与 IncrementalDiffStartingScanner 的主要区别在于：它不通过对比两个全量快照状态来计算差异，而是直接读取快照记录中的 Delta（增量数据文件）或 Changelog（变更日志文件）
+// 基于“左开右闭” (startId, endId] 的区间原则，收集并合并多个快照产生的增量文件。
+// 它通过遍历指定范围内的所有 Snapshot，提取这些快照提交时新增的文件元数据，最后将这些文件组合成 DataSplit 供下游读取。这通常用于流式读取的初始化阶段，或者批处理中只想读取某一段增量数据的场景。
+
 public class IncrementalDeltaStartingScanner extends AbstractStartingScanner {
 
     private static final Logger LOG =
             LoggerFactory.getLogger(IncrementalDeltaStartingScanner.class);
-
+    // endingSnapshotId (long): 增量扫描的终止快照 ID（闭区间终点）。
     private final long endingSnapshotId;
+    // scanMode (ScanMode): 扫描模式
+    // DELTA：读取快照的 Delta 增量数据文件。
+    // CHANGELOG：读取快照关联的物理 Changelog 文件。
     private final ScanMode scanMode;
 
     public IncrementalDeltaStartingScanner(
@@ -145,7 +152,8 @@ public class IncrementalDeltaStartingScanner extends AbstractStartingScanner {
 
         return StartingScanner.fromPlan(new PlanImpl(null, endingSnapshotId, result));
     }
-
+    // 根据起始和结束 ID 创建扫描器。
+    // 遵循“左开右闭”原则，允许 startId 等于 earliestSnapshotId - 1（代表从头开始读第一个快照）
     public static StartingScanner betweenSnapshotIds(
             long startId, long endId, SnapshotManager snapshotManager, ScanMode scanMode) {
         long earliestSnapshotId = snapshotManager.earliestSnapshotId();
@@ -164,7 +172,8 @@ public class IncrementalDeltaStartingScanner extends AbstractStartingScanner {
 
         return new IncrementalDeltaStartingScanner(snapshotManager, startId, endId, scanMode);
     }
-
+    // 根据时间范围确定快照 ID 范围。
+    // 寻找早于或等于 startTimestamp 的快照
     public static IncrementalDeltaStartingScanner betweenTimestamps(
             long startTimestamp,
             long endTimestamp,

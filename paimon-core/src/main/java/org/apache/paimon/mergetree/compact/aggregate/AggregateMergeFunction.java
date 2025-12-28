@@ -46,16 +46,28 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
  * A {@link MergeFunction} where key is primary key (unique) and value is the partial record,
  * pre-aggregate non-null fields on merge.
  */
+// AggregateMergeFunction 的作用是 “按列执行预定义的聚合逻辑”。
+// 与普通的“覆盖（Deduplicate）”或“首行（FirstRow）”引擎不同，聚合引擎允许用户对非主键列分别配置不同的聚合函数（如 sum、max、min、last_non_null_value 等）。
+// 当多条具有相同主键的记录到达时，它会将这些记录对应的字段逐一交给相应的聚合器进行处理，最终生成一条汇总后的记录。
 public class AggregateMergeFunction implements MergeFunction<KeyValue> {
-
+    // 作用：字段提取器数组。
+    // 用于从输入的 InternalRow 中高效地获取特定位置的字段值。
     private final InternalRow.FieldGetter[] getters;
+    // 字段聚合器数组。
+    // 每个元素对应一列的聚合逻辑（例如第一列是 Sum，第二列是 Max）。
     private final FieldAggregator[] aggregators;
+    // 存储各列是否允许为 Null 的标志，用于初始化行时的校验。
     private final boolean[] nullables;
-
+    // 记录最后一次收到的 KeyValue 对象，
+    // 主要用于获取其主键、序列号等元数据。
     private KeyValue latestKv;
+    // 聚合累加器（中转站）。它存储了当前所有字段聚合后的中间结果。
     private GenericRow row;
+    // 为了减少对象创建开销而复用的 KeyValue 对象。
     private KeyValue reused;
+    // 标记当前合并过程中是否遇到并处理了删除（DELETE）类型的记录。
     private boolean currentDeleteRow;
+    // 决定当收到 DELETE 记录时，是清空整个聚合状态还是执行特定的回撤逻辑。
     private final boolean removeRecordOnDelete;
 
     public AggregateMergeFunction(
