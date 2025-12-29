@@ -56,15 +56,31 @@ import static org.apache.paimon.predicate.PredicateBuilder.pickTransformFieldMap
 import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
 
 /** {@link FileStore} for querying and updating {@link KeyValue}s. */
+// KeyValueFileStore 是专门用于处理有主键（Primary Key）表的物理存储引擎实现。
+// 它继承自 AbstractFileStore<KeyValue>，是 Paimon 核心的 LSM-Tree（Log-Structured Merge-Tree） 存储逻辑的所在地。
+// 核心作用是管理基于键值对（Key-Value）的数据流。
+// 实现主键更新逻辑：它负责处理数据的插入、更新和删除，并根据主键进行去重或合并。
+// 驱动 LSM 引擎：协调写入（Write-Ahead Log 和 MemTable）、压缩（Compaction）以及读取（Merge-on-Read）过程。
+// 支持多种分桶模式：灵活支持固定分桶、动态分桶以及用于特殊场景的推迟分桶模式。
+// 元数据与物理存储的桥梁：将逻辑上的主键和值映射为物理文件中的 KeyValue 结构。
 public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
-
+    // 标记是否允许跨分区更新主键。
+    // 这会直接影响分桶模式（Bucket Mode）的选择。
     private final boolean crossPartitionUpdate;
+    // 分桶键（Bucket Key）的行类型。用于计算数据属于哪一个桶。
     private final RowType bucketKeyType;
+    // 主键（Key）的行类型。这是 LSM-Tree 排序和去重的核心依据。
     private final RowType keyType;
+    // 值（Value）的行类型。包含除主键外的所有数据列。
     private final RowType valueType;
+    // 字段提取器。负责从原始行数据中剥离出 Key 和 Value。
     private final KeyValueFieldsExtractor keyValueFieldsExtractor;
+    // 主键比较器供应者。提供用于主键排序的 Comparator，确保 LSM 层级文件是有序的。
     private final Supplier<Comparator<InternalRow>> keyComparatorSupplier;
+    // 日志去重比较器。在生成 Changelog 时，用于判断两行数据内容是否完全一致（可配置忽略某些字段）。
     private final Supplier<RecordEqualiser> logDedupEqualSupplier;
+    // 合并函数工厂。
+    // 定义了当主键冲突时，如何合并多个 Value（如：去重保留最新、求和、部分更新等）。
     private final MergeFunctionFactory<KeyValue> mfFactory;
 
     public KeyValueFileStore(

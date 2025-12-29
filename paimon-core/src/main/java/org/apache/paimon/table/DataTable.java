@@ -30,8 +30,12 @@ import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
 /** A {@link Table} for data. */
+// 如果说 Table 是基础定义，InnerTable 是内部实现接口，那么 DataTable 就是真正持有物理存储元数据和管理组件的核心入口。
+// DataTable 的主要作用是提供对 Paimon 表底层管理组件的全面访问能力。
 public interface DataTable extends InnerTable {
-
+    // 创建一个数据表扫描器。
+    // 相比于 InnerTable.newScan()，它返回更具体的 DataTableScan。
+    // 它不仅能决定读哪些文件，还能处理分区过滤（Partition Pruning）和桶（Bucket）过滤。
     @Override
     DataTableScan newScan();
 

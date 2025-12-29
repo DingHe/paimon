@@ -87,17 +87,29 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  *
  * @param <T> type of record to read and write.
  */
+// AbstractFileStore 扮演了 “存储引擎管家” 的角色。它的主要职责包括：
+// 资源抽象与封装：封装了文件系统操作（FileIO）、模式管理（SchemaManager）和配置项（CoreOptions）。
+// 组件工厂的基石：实现了 FileStore 中定义的大部分“工厂方法”，例如如何创建快照管理器、清单文件工厂、索引处理器等。
+// 标准化流程控制：定义了数据提交（Commit）、过期清理（Expire）、快照删除（Deletion）等核心操作的标准流程。
+// 适配外部生态：管理与外部系统（如 Hive Metastore 或 Iceberg）的交互回调（Callbacks）。
 abstract class AbstractFileStore<T> implements FileStore<T> {
-
+    // 抽象的文件系统接口，用于屏蔽底层存储（HDFS, S3, OSS, 本地等）的差异
     protected final FileIO fileIO;
+    // 用于管理 Table Schema 的历史版本，处理 Schema Evolution（模式演进）。
     protected final SchemaManager schemaManager;
+    // 当前表的逻辑 Schema
     protected final TableSchema schema;
+    // 表名
     protected final String tableName;
+    // 核心配置对象，包含了分桶、合并策略、过期时间等所有表参数
     protected final CoreOptions options;
+    // 分区字段的类型信息
     protected final RowType partitionType;
+    // 目录环境，提供了 Snapshot 提交器、分区处理器等目录级别的资源。
     protected final CatalogEnvironment catalogEnvironment;
-
+    // 清单文件缓存。为了性能优化，在读取大量的 Manifest 列表时会缓存中间段。
     @Nullable private SegmentsCache<Path> readManifestCache;
+    // 快照缓存。缓存 Snapshot 对象，避免频繁从磁盘读取 JSON 格式的 Snapshot 文件。
     @Nullable private Cache<Path, Snapshot> snapshotCache;
 
     protected AbstractFileStore(

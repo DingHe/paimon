@@ -49,6 +49,11 @@ import static org.apache.paimon.predicate.PredicateBuilder.pickTransformFieldMap
 import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
 
 /** {@link FileStore} for reading and writing {@link InternalRow}. */
+// AppendOnlyFileStore 是专门用于处理**仅追加表（Append-only Table）**的底层物理存储引擎实现。它继承自 AbstractFileStore<InternalRow>，主要面向不需要主键约束、追求高吞吐量写入的场景。
+// 负责管理不含主键的数据流的物理读写逻辑。其核心职责包括：
+// 物理文件读写：定义了如何将普通的 InternalRow（数据行）写入文件系统，以及如何从文件中读取。
+
+
 public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
 
     private final RowType bucketKeyType;

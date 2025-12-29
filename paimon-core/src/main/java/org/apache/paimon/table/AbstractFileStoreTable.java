@@ -84,18 +84,31 @@ import java.util.function.BiConsumer;
 import static org.apache.paimon.CoreOptions.PATH;
 
 /** Abstract {@link FileStoreTable}. */
+// 该类是 Paimon 表对象（如 PrimaryKeyFileStoreTable 和 AppendOnlyFileStoreTable）的基类，负责管理表的元数据、配置、读写算子的构建以及版本管理。
+// 该类充当了 “表对象管理器”。它将文件系统中的物理文件抽象为逻辑上的“表”。其核心职责包括：
+// 配置管理：解析和维护表参数（CoreOptions）。
+// 读写组件工厂：生成用于读取（Scan/Read）和写入（Commit/Write）的各种核心组件。
+// 多版本控制：管理快照（Snapshot）、标签（Tag）和分支（Branch）。
+// 缓存协调：协调清单文件（Manifest）、快照和统计信息的缓存，以提高元数据访问效率。
+
 abstract class AbstractFileStoreTable implements FileStoreTable {
 
     private static final long serialVersionUID = 1L;
-
+    // 负责与底层存储（HDFS/S3/OSS/本地）交互的 IO 接口。
     protected final FileIO fileIO;
+    // 表在文件系统中的根目录路径。
     protected final Path path;
+    // 当前表的结构定义，包括列、分区、主键和配置选项。
     protected final TableSchema tableSchema;
+    // 环境上下文，包含 Identifier（标识符）、UUID 和权限认证信息。
     protected final CatalogEnvironment catalogEnvironment;
-
+    // 缓存清单文件的内存段。
     @Nullable protected transient SegmentsCache<Path> manifestCache;
+    // 缓存快照 JSON 对象的缓存。
     @Nullable protected transient Cache<Path, Snapshot> snapshotCache;
+    // 缓存列统计信息的缓存。
     @Nullable protected transient Cache<String, Statistics> statsCache;
+    // 缓存删除向量（Deletion Vectors）元数据的缓存。
     @Nullable protected transient DVMetaCache dvmetaCache;
 
     protected AbstractFileStoreTable(
@@ -146,13 +159,13 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     public void setDVMetaCache(DVMetaCache cache) {
         this.dvmetaCache = cache;
     }
-
+    // 获取最新快照或指定 ID 的快照。
     @Override
     public Optional<Snapshot> latestSnapshot() {
         Snapshot snapshot = store().snapshotManager().latestSnapshot();
         return Optional.ofNullable(snapshot);
     }
-
+    // 获取最新快照或指定 ID 的快照。
     @Override
     public Snapshot snapshot(long snapshotId) {
         return store().snapshotManager().snapshot(snapshotId);
@@ -199,7 +212,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         long earliestCreationTime = schemaManager().earliestCreationTime();
         return fullName() + "." + earliestCreationTime;
     }
-
+    // 读取并返回表的统计信息（如总行数、列最大/最小值）。
     @Override
     public Optional<Statistics> statistics() {
         Snapshot snapshot = TimeTravelUtil.tryTravelOrLatest(this);
@@ -222,10 +235,12 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         }
         return Optional.empty();
     }
-
+    // 根据表的分桶模式（Bucket Mode）来决定是否需要以及如何创建数据分发路由逻辑。
     @Override
     public Optional<WriteSelector> newWriteSelector() {
         switch (bucketMode()) {
+            // 匹配**固定分桶（Fixed Bucket）**模式。
+            // 场景：用户在创建表时指定了 bucket = N。在这种模式下，数据必须根据主键哈希精确落入对应的物理 Bucket 目录中。
             case HASH_FIXED:
                 return Optional.of(new FixedBucketWriteSelector(schema()));
             case BUCKET_UNAWARE:
@@ -241,7 +256,8 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     public CatalogEnvironment catalogEnvironment() {
         return catalogEnvironment;
     }
-
+    // createRowKeyExtractor 方法就是用来根据不同的分桶模式，生产对应的“信息提取专家”。
+    // RowKeyExtractor 的职责是从一条原始的 InternalRow 记录中，提取出 Partition（分区）、Key（主键） 以及 Bucket（分桶） 信息。这是写入数据前的必备步骤。
     public RowKeyExtractor createRowKeyExtractor() {
         switch (bucketMode()) {
             case HASH_FIXED:
@@ -257,7 +273,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 throw new UnsupportedOperationException("Unsupported mode: " + bucketMode());
         }
     }
-
+    // 构建 SnapshotReader，它是所有读取操作的基础，负责根据快照读取清单。
     @Override
     public SnapshotReader newSnapshotReader() {
         return new SnapshotReaderImpl(
@@ -273,7 +289,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 store().newIndexFileHandler(),
                 dvmetaCache);
     }
-
+    // 生成 批处理 扫描器（DataTableBatchScan）
     @Override
     public DataTableScan newScan() {
         DataTableBatchScan scan =
@@ -288,7 +304,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         }
         return scan;
     }
-
+    // 生成 流处理 扫描器（DataTableStreamScan），用于监听新快照。
     @Override
     public StreamDataTableScan newStreamScan() {
         return new DataTableStreamScan(
@@ -425,6 +441,8 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         return tableSchema;
     }
 
+    // 返回 SnapshotManager，
+    // 用于快照的生命周期管理。
     @Override
     public SnapshotManager snapshotManager() {
         return store().snapshotManager();

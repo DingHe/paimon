@@ -50,10 +50,17 @@ import java.util.function.BiConsumer;
 import java.util.function.Function;
 
 /** {@link FileStoreTable} for append table. */
+// 专门用于处理**仅追加表（Append-only Table）**的核心实现类。它继承自 AbstractFileStoreTable，适用于不需要主键约束、只需高效写入和批量读取的场景。
+// 主要作用是管理不含主键的数据流。
+// 高效写入：由于不需要像主键表那样进行“读时合并”或“写时查找”，它直接将数据追加到文件中，具有极高的写入吞吐量。
+// 物理存储简化：数据通常按顺序存储在数据文件中，不涉及 LSM-Tree 的复杂合并逻辑。
+// 支持多种分桶模式：支持 BUCKET_UNAWARE（不分桶，纯追加）和固定分桶模式。
+// 架构适配：将通用的表操作（Read/Write）桥接到专门的 AppendOnlyFileStore 引擎上。
+
 public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
 
     private static final long serialVersionUID = 1L;
-
+    // 底层物理存储引擎。
     private transient AppendOnlyFileStore lazyStore;
 
     AppendOnlyFileStoreTable(FileIO fileIO, Path path, TableSchema tableSchema) {

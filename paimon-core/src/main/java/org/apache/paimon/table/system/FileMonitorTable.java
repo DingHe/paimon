@@ -72,21 +72,33 @@ import static org.apache.paimon.utils.SerializationUtils.newBytesType;
 import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 
 /** A table to produce modified files for snapshots. */
+// FileMonitorTable 是一个特殊的系统表（System Table）。它并不存储实际的用户数据，而是作为一种元数据观测视图存在。
+// FileMonitorTable 的核心作用是：监控并产生快照（Snapshot）级别的文件变更信息。
+// 通常情况下，Paimon 的表返回的是行数据。但 FileMonitorTable 返回的是**“文件的变化”**。当你查询这个表时，它会告诉你：
+// 在某次快照中，哪些分区和桶里的哪些文件被删除了（Before Files），哪些新文件被增加了（Data Files）。
+// 这在以下场景中非常有用：
+//
+//构建二级索引：外部系统需要知道哪些物理文件发生了变化，以便更新外部索引。
+//
+//审计与监控：监控存储层的文件布局演变和数据写入频率。
+//
+//异步处理：触发基于文件落地的下游离线处理任务。
 @Experimental
 public class FileMonitorTable implements DataTable, ReadonlyTable {
 
     private static final long serialVersionUID = 1L;
-
+    // 被包装的原始物理表（主表）
+    // 提供实际的快照管理、扫描和元数据读取能力。所有的监控逻辑都是基于这个主表的变更进行的。
     private final FileStoreTable wrapped;
-
+    // 定义了该系统表的 Schema 结构。
     private static final RowType ROW_TYPE =
             RowType.of(
                     new DataType[] {
-                        new BigIntType(false),
-                        newBytesType(false),
-                        new IntType(false),
-                        newBytesType(false),
-                        newBytesType(false)
+                        new BigIntType(false), // 产生变更的快照 ID。
+                        newBytesType(false), // 变更发生的分区。
+                        new IntType(false), // 变更发生的桶 ID。
+                        newBytesType(false), // 该次变更中被移除或覆盖的文件列表（序列化后的字节）。
+                        newBytesType(false) // 该次变更中新增的文件列表（序列化后的字节）。
                     },
                     new String[] {
                         "_SNAPSHOT_ID", "_PARTITION", "_BUCKET", "_BEFORE_FILES", "_DATA_FILES"

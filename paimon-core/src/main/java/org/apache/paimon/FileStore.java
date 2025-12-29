@@ -59,18 +59,25 @@ import java.util.List;
  *
  * @param <T> type of record to read and write.
  */
-public interface FileStore<T> {
+// 如果说 FileStoreTable 是面向用户的“逻辑层”，那么 FileStore 就是负责数据物理落地的**“存储引擎层”**。
+// 物理存储网关：它屏蔽了具体的文件格式（如 ORC, Parquet）和物理布局，为上层提供统一的读（Read）、写（Write）、扫（Scan）和提交（Commit）能力。
+// 组件工厂：它作为一个“中心工厂”，负责创建和维护管理数据生命周期所需的所有关键组件（如快照管理、清单文件处理、索引处理等）。
+// 核心机制实现者：Paimon 最核心的 Snapshot（快照）机制 和 Manifest（清单）管理 都是通过 FileStore 的实现类来落地的。
 
+public interface FileStore<T> {
+    // 返回路径工厂。
+    // 负责定义 Paimon 在文件系统中的目录结构（例如分区目录、Bucket 目录、元数据路径等）。
     FileStorePathFactory pathFactory();
 
     SnapshotManager snapshotManager();
 
     ChangelogManager changelogManager();
-
+    // 返回分区字段的 RowType（类型信息）。
     RowType partitionType();
-
+    // 返回分区计算器。
+    // 负责从原始行数据中提取分区值并转换为底层的 BinaryRow。
     InternalRowPartitionComputer partitionComputer();
-
+    // 获取表的配置项（CoreOptions），如压缩格式、合并引擎、分桶数等
     CoreOptions options();
 
     BucketMode bucketMode();

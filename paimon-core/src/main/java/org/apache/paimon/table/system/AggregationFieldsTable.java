@@ -58,6 +58,12 @@ import java.util.function.Function;
 import static org.apache.paimon.catalog.Identifier.SYSTEM_TABLE_SPLITTER;
 
 /** A {@link Table} for showing Aggregation of table. */
+// AggregationFieldsTable 的作用是：以表格形式暴露用户在 WITH 参数中配置的字段聚合规则。
+// 在 Paimon 的主键表中，如果用户指定了 'merge-engine' = 'aggregation'，通常还需要配置具体的聚合函数（如 fields.field_name.aggregate = sum）。这个系统表允许用户通过 SQL 直接查询：
+//哪些字段配置了聚合函数。
+//使用了什么聚合函数（sum, min, max, collect 等）。
+//聚合函数对应的配置参数。
+//用户可以通过 SELECT * FROM my_table$aggregation_fields 访问该表。
 public class AggregationFieldsTable implements ReadonlyTable {
 
     private static final long serialVersionUID = 1L;
