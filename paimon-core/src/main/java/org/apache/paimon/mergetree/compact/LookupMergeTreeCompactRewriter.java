@@ -53,14 +53,30 @@ import static org.apache.paimon.mergetree.compact.ChangelogMergeTreeRewriter.Upg
  * A {@link MergeTreeCompactRewriter} which produces changelog files by lookup for the compaction
  * involving level 0 files.
  */
+// 专门用于在 Lookup 合并模式下执行数据重写和 Changelog 生成。
+// 在 Paimon 中，如果配置了 changelog-producer = lookup，系统在合并（Compaction）时需要知道某条数据在“更底层”是否存在，
+// 以便准确判断它是 INSERT（新插入）还是 UPDATE（更新）。
+// 点查辅助合并：在合并 Level 0 文件或执行跨层合并时，通过 LookupLevels（通常是内存索引或本地 SST 索引）去更高层级检索主键是否存在。
+// 生成高精度 Changelog：基于 Lookup 的结果，它可以产出包含 UPDATE_BEFORE 的完整变更流。
+// 维护删除向量 (Deletion Vector)：如果开启了 DV 模式，它负责在重写过程中更新或清理相关的删除标记。
+// 支持远程索引：配合 RemoteLookupFileManager，支持将索引信息维护在远程存储。
+
 public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewriter {
-
+    // 封装了对 LSM-Tree 历史层级的点查逻辑，用于判断 Key 是否存在及其旧值。
     private final LookupLevels<T> lookupLevels;
+    // 用于创建 MergeFunctionWrapper，
+    // 它是处理合并逻辑和生成 ChangelogResult 的地方。
     private final MergeFunctionWrapperFactory<T> wrapperFactory;
+    // 标识表中是否定义了序列号字段。如果没有序列号，DEDUPLICATE 引擎的升级策略可以优化。
     private final boolean noSequenceField;
+    // 删除向量维护者。
+    // 处理物理删除标记的增删。
     @Nullable private final BucketedDvMaintainer dvMaintainer;
+    // 函数式接口。
+    // 根据层级获取文件格式（例如某些层级用 ORC，某些用 Parquet）。
     private final IntFunction<String> level2FileFormat;
-
+    // 远程 Lookup 文件管理器。
+    // 用于在分布式环境下管理和生成 Lookup 所需的索引文件。
     @Nullable private final RemoteLookupFileManager<T> remoteLookupFileManager;
 
     public LookupMergeTreeCompactRewriter(
@@ -122,36 +138,49 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
         }
         return result;
     }
-
+    // 决定在压缩（Compaction）过程中是否需要物理重写并生成 Changelog 的入口。
+    // 判定本次 Compaction 任务是否属于“必须重写数据以生成变更日志”的场景。
     @Override
     protected boolean rewriteChangelog(
             int outputLevel, boolean dropDelete, List<List<SortedRun>> sections) {
         return rewriteLookupChangelog(outputLevel, sections);
     }
-
+    // 当一个文件从低层级“升级”到高层级时，是否需要生成 Changelog（变更日志），以及是否需要物理上重写该文件。
     @Override
     protected UpgradeStrategy upgradeStrategy(int outputLevel, DataFileMeta file) {
+        // 非 0 层文件的快速返回
+        // 检查文件的原始层级。如果文件不是来自 Level 0，则直接返回“不生成 Changelog 且不重写”。
+        // 在 LSM-Tree 中，Level 0 以外的层级通常已经是有序且去重的。如果只是单纯的层级提升（Upgrade），且不是从 L0 开始，通常不需要重新处理数据。
         if (file.level() != 0) {
             return NO_CHANGELOG_NO_REWRITE;
         }
 
         // forcing rewriting when upgrading from level 0 to level x with different file formats
+        // 文件格式不一致触发重写
+        // 比较原始层级和目标层级的文件格式（如 Parquet 或 ORC）。
+        // 如果 Level 0 使用的存储格式与目标层级（outputLevel）不同，则必须物理重写文件。此时会返回 CHANGELOG_WITH_REWRITE，表示需要生成变更日志并重写数据。
         if (!level2FileFormat.apply(file.level()).equals(level2FileFormat.apply(outputLevel))) {
             return CHANGELOG_WITH_REWRITE;
         }
 
         // In deletionVector mode, since drop delete is required, when delete row count > 0 rewrite
         // is required.
+        // 判断是否处于 DV 模式，且文件中是否存在已删除的行。
+        // 如果启用了删除向量（dvMaintainer != null），为了彻底清理（Drop）那些被标记为删除的行，如果文件中存在删除记录（或无法确定删除数量时），必须通过重写文件来完成物理删除。
         if (dvMaintainer != null && file.deleteRowCount().map(cnt -> cnt > 0).orElse(true)) {
             return CHANGELOG_WITH_REWRITE;
         }
-
+        // 如果文件直接升级到了 LSM-Tree 的最底层（Max Level）。
+        // 到达最底层意味着数据已经处于最终态。Paimon 认为此时不需要重写数据内容，只需要生成 Changelog 来通知下游系统数据已落盘即可。
         if (outputLevel == maxLevel) {
             return CHANGELOG_NO_REWRITE;
         }
 
         // DEDUPLICATE retains the latest records as the final result, so merging has no impact on
         // it at all.
+        // 判断合并引擎是否为 DEDUPLICATE（去重）且没有配置序列字段（Sequence Field）。
+        // 去重引擎只保留主键对应的最新一条数据。如果没有序列字段来定义优先级，合并操作对最终结果没有影响。
+        // 因此，只需生成 Changelog，无需浪费 IO 去物理重写文件。
         if (mergeEngine == MergeEngine.DEDUPLICATE && noSequenceField) {
             return CHANGELOG_NO_REWRITE;
         }
@@ -159,6 +188,7 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
         // other merge engines must rewrite file, because some records that are already at higher
         // level may be merged
         // See LookupMergeFunction, it just returns newly records.
+        // 对于其他的合并引擎（如 PartialUpdate 或 Aggregation），必须重写文件。
         return CHANGELOG_WITH_REWRITE;
     }
 
@@ -173,6 +203,7 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
     }
 
     /** Factory to create {@link MergeFunctionWrapper}. */
+    // 负责将复杂的 Lookup 组件（如 LookupLevels、mfFactory）组装成一个能够处理数据合并并产生 ChangelogResult（变更日志结果）的运行时对象。
     public interface MergeFunctionWrapperFactory<T> {
 
         MergeFunctionWrapper<ChangelogResult> create(
@@ -183,6 +214,8 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
     }
 
     /** A normal {@link MergeFunctionWrapperFactory} to create lookup wrapper. */
+    // 通用 Lookup 合并工厂。用于处理大多数合并引擎（如 DEDUPLICATE、PARTIAL_UPDATE、AGGREGATE）。
+    // 创建一个能够从高层级（outputLevel + 1）查找旧数据，并与当前数据进行对比、合并，最终生成更新前（Before）和更新后（After）快照的包装器。
     public static class LookupMergeFunctionWrapperFactory<T>
             implements MergeFunctionWrapperFactory<T> {
 
@@ -205,8 +238,10 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
                 int outputLevel,
                 LookupLevels<T> lookupLevels,
                 @Nullable BucketedDvMaintainer deletionVectorsMaintainer) {
+            // 返回 LookupChangelogMergeFunctionWrapper。这个对象在运行时会执行：读取 -> Lookup 查找旧值 -> 执行 MergeFunction -> 产生 Changelog。
             return new LookupChangelogMergeFunctionWrapper<>(
                     mfFactory,
+                    // 如果你想知道这个 Key 的旧值，就去比当前输出层级更深（+1）的层级去找。
                     key -> {
                         try {
                             return lookupLevels.lookup(key, outputLevel + 1);
@@ -222,6 +257,8 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
     }
 
     /** A {@link MergeFunctionWrapperFactory} for first row. */
+    // 首行（First Row）合并工厂。
+    // 专门用于 first-row 引擎。在这种模式下，Paimon 只保留主键第一次出现的那一行。因此，工厂创建的包装器逻辑非常简单：只需判断主键是否在更高层级存在即可（存在即丢弃当前行）。
     public static class FirstRowMergeFunctionWrapperFactory
             implements MergeFunctionWrapperFactory<Boolean> {
 

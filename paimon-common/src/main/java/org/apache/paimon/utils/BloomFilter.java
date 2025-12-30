@@ -24,9 +24,18 @@ import org.apache.paimon.memory.MemorySegment;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Bloom filter based on one memory segment. */
-public class BloomFilter {
+// 在 Apache Paimon 中，BloomFilter（布隆过滤器）是一个非常关键的概率型数据结构。
+// 它主要用于在 LSM 树 的数据读取路径上进行 数据过滤（Data Skipping）
+// BloomFilter 的主要作用是：快速判断一个元素是否“可能存在”或“肯定不存在”于某个数据集合中。
+// 在 Paimon 中，它通常与 SST 文件（数据文件）关联。当查询某个特定主键时：
+// 如果布隆过滤器返回 false，则该主键肯定不在这个文件中，系统可以直接跳过该文件，从而节省大量的 IO 开销。
+// 如果返回 true，则主键可能在文件中，系统会进一步读取文件内容。
 
+
+public class BloomFilter {
+    // 底层的位图实现
     private final BitSet bitSet;
+    // 哈希函数的个数。
     private final int numHashFunctions;
 
     public BloomFilter(long expectedEntries, int byteSize) {
@@ -70,7 +79,7 @@ public class BloomFilter {
     static int optimalNumOfHashFunctions(long expectEntries, long bitSize) {
         return Math.max(1, (int) Math.round((double) bitSize / expectEntries * Math.log(2)));
     }
-
+    // 向过滤器中添加一个元素的哈希值。
     public void addHash(int hash1) {
         int hash2 = hash1 >>> 16;
 
@@ -84,7 +93,7 @@ public class BloomFilter {
             bitSet.set(pos);
         }
     }
-
+    // 检查某个哈希值是否可能存在。
     public boolean testHash(int hash1) {
         int hash2 = hash1 >>> 16;
 

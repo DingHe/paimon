@@ -22,6 +22,7 @@ import java.io.Closeable;
 import java.io.IOException;
 
 /** Writer to prepare binary file. */
+// 将格式化后的键值对（Key-Value）持久化到高性能的本地索引文件中（通常是 SST 格式，即 Sorted String Table）
 public interface LookupStoreWriter extends Closeable {
 
     /** Put key value to store. */

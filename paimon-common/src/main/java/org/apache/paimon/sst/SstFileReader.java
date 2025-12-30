@@ -42,11 +42,22 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  *
  * <p>Note that this class is NOT thread-safe.
  */
+// 在 Apache Paimon 的存储层中，SstFileReader 是一个至关重要的组件。它模仿了 RocksDB 等 LSM-Tree 存储引擎的设计，
+// 专门用于读取 SST (Sorted String Table) 格式的文件。
+// 主要作用是提供对有序持久化文件（SST）的高效查询能力。它支持两种查询模式：
+// 点查询 (Point Query)：快速查找一个特定的 Key 对应的 Value。
+// 范围查询 (Range Query)：通过迭代器定位到某个起始位置，并按顺序读取后续记录。
+// 为了实现高性能，它集成了 布隆过滤器 (Bloom Filter) 以减少无效 IO，并使用 两级索引结构（索引块 + 数据块）来定位数据。
 public class SstFileReader implements Closeable {
-
+    // 字节比较器。
     private final Comparator<MemorySlice> comparator;
+    // 块缓存管理器。
     private final BlockCache blockCache;
+    // 索引块读取器。
+    // 存储了每个数据块（Data Block）最后一条记录的 Key 以及该块在文件中的位置。它是定位数据的第一站。
     private final BlockReader indexBlock;
+    // 基于文件的布隆过滤器。
+    // 可选组件。用于在真正读取索引之前判定 Key 是否可能存在，从而极大地优化“查无此记录”的场景。
     @Nullable private final FileBasedBloomFilter bloomFilter;
 
     public SstFileReader(
@@ -68,10 +79,11 @@ public class SstFileReader implements Closeable {
      */
     @Nullable
     public byte[] lookup(byte[] key) throws IOException {
+        // 布隆过滤: 先算 Hash，如果布隆过滤器说没有，直接返回 null。
         if (bloomFilter != null && !bloomFilter.testHash(MurmurHashUtils.hashBytes(key))) {
             return null;
         }
-
+        // 索引定位: 在 indexBlock 中执行 seekTo，找到该 Key 可能存在的那个数据块。
         MemorySlice keySlice = MemorySlice.wrap(key);
         // seek the index to the block containing the key
         BlockIterator indexBlockIterator = indexBlock.iterator();
@@ -80,6 +92,7 @@ public class SstFileReader implements Closeable {
         // if indexIterator does not have a next, it means the key does not exist in this iterator
         if (indexBlockIterator.hasNext()) {
             // seek the current iterator to the key
+            // 数据块查询: 加载对应的数据块（Data Block），在块内查找。如果找到则返回 Value。
             BlockIterator current = getNextBlock(indexBlockIterator);
             if (current.seekTo(keySlice)) {
                 return current.next().getValue().copyBytes();

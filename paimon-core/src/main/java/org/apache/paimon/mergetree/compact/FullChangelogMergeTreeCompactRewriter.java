@@ -40,6 +40,15 @@ import static org.apache.paimon.mergetree.compact.ChangelogMergeTreeRewriter.Upg
 import static org.apache.paimon.mergetree.compact.ChangelogMergeTreeRewriter.UpgradeStrategy.NO_CHANGELOG_NO_REWRITE;
 
 /** A {@link MergeTreeCompactRewriter} which produces changelog files for each full compaction. */
+// FullChangelogMergeTreeCompactRewriter 是一个专门用于处理 全量合并（Full Compaction） 并生成 完整变更日志（Full Changelog） 的重写器。
+// 与之前讨论的基于 Lookup 的重写器不同，它不依赖外部索引，而是在所有层级数据参与的大合并中产出 Changelog。
+// 在执行 Full Compaction（将所有层级的数据合并到最大层 maxLevel）时，计算并产出 Changelog 文件。
+// 在 Paimon 中，如果设置了 changelog-producer = full-compaction，每当触发全量合并时，系统会对比旧的最大层数据和新合并进来的数据。
+//如果某行数据是新出现的，生成 INSERT 日志。
+//如果某行数据被更新了，生成 UPDATE_BEFORE 和 UPDATE_AFTER。
+//如果某行数据被删除了，生成 DELETE。
+//由于它是在全量合并时进行的，因此它能保证产生最精确、无冗余的变更流，常用于对数据正确性要求极高且能容忍全量合并开销的场景。
+
 public class FullChangelogMergeTreeCompactRewriter extends ChangelogMergeTreeRewriter {
 
     @Nullable private final RecordEqualiser valueEqualiser;

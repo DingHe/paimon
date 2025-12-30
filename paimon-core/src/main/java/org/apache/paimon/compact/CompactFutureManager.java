@@ -26,10 +26,12 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 
 /** Base implementation of {@link CompactManager} which runs compaction in a separate thread. */
+// 专门负责处理异步合并任务的状态管理
+// 核心作用是封装了对异步合并任务（Future）的生命周期管理。
 public abstract class CompactFutureManager implements CompactManager {
-
+    // 持有了当前正在后台执行的合并任务的引用
     protected Future<CompactResult> taskFuture;
-
+    // 取消当前正在运行的合并任务
     @Override
     public void cancelCompaction() {
         // TODO this method may leave behind orphan files if compaction is actually finished
@@ -38,15 +40,16 @@ public abstract class CompactFutureManager implements CompactManager {
             taskFuture.cancel(true);
         }
     }
-
+    // 快速检查合并是否“未完成”
     @Override
     public boolean compactNotCompleted() {
         return taskFuture != null;
     }
-
+    // 内部获取合并结果的核心逻辑
     protected final Optional<CompactResult> innerGetCompactionResult(boolean blocking)
             throws ExecutionException, InterruptedException {
         if (taskFuture != null) {
+            // 如果参数 blocking 为 true（强制等待），或者任务已经自然结束（isDone()），则进入提取阶段。
             if (blocking || taskFuture.isDone()) {
                 CompactResult result;
                 try {

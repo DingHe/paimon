@@ -36,6 +36,9 @@ import java.io.IOException;
 import java.util.Comparator;
 
 /** A {@link LookupStoreFactory} which uses hash to lookup records on disk. */
+// SortLookupStoreFactory 的作用是：作为构造器，统一创建和配置有序的 Lookup 存储组件。
+// 由于 Paimon 的 Lookup 索引默认采用类似 RocksDB 的有序存储方式（SST 格式），该工厂类封装了创建这些组件所需的公共配置（如比较器、缓存、块大小、压缩算法等）。
+// 它确保了产生的 Writer 能够写出规范的有序文件，而 Reader 能够正确加载这些文件并利用索引进行查找。
 public class SortLookupStoreFactory implements LookupStoreFactory {
 
     private final Comparator<MemorySlice> comparator;

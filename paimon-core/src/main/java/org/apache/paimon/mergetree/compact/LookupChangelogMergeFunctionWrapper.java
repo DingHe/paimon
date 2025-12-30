@@ -51,16 +51,27 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  *       level as BEFORE.
  * </ul>
  */
+// 在包含 Level 0 文件的 Compaction（压缩合并）过程中，通过反向查找（Lookup）历史数据来生成精确的变更日志（Changelog）。
+// 在 LSM-Tree 中，Level 0 的文件是乱序且可能包含重复 Key 的。当 L0 文件参与合并时，为了让下游知道数据到底发生了什么变化（是新增、更新还是删除），这个类会：
+// 收集当前参与合并的所有 KeyValue。
+// 如果没有高层级（Level > 0）的旧数据，它会调用 lookup 函数去更深层的文件中查找该 Key 的“前世（Before Value）”。
+// 对比“前世”与“今生（Merged Result）”，计算出 INSERT、UPDATE_BEFORE、UPDATE_AFTER 或 DELETE 等消息。
+
 public class LookupChangelogMergeFunctionWrapper<T>
         implements MergeFunctionWrapper<ChangelogResult> {
-
+    // 实际执行数据聚合逻辑的对象（如求和、保留最新等）。
+    // 它必须是 LookupMergeFunction 类型，因为它提供了识别数据层级的能力。
     private final LookupMergeFunction mergeFunction;
+    // 当本地合并的文件中没有旧数据时，
+    // 调用此函数从更高层级的索引（SstFile/LookupFile）中查询数据。
     private final Function<InternalRow, T> lookup;
-
+    // 为了减少垃圾回收（GC）压力而设计的重用对象，分别用于承载最终结果、变更前快照和变更后快照。
     private final ChangelogResult reusedResult = new ChangelogResult();
     private final KeyValue reusedBefore = new KeyValue();
     private final KeyValue reusedAfter = new KeyValue();
+    // 用于判断两个 Value 是否在逻辑上完全相等
     @Nullable private final RecordEqualiser valueEqualiser;
+    // 决定是否需要产生 Changelog 以及是否启用 Deletion Vector（删除向量）。
     private final LookupStrategy lookupStrategy;
     private final @Nullable BucketedDvMaintainer deletionVectorsMaintainer;
     private final Comparator<KeyValue> comparator;

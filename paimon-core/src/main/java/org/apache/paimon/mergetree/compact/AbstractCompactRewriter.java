@@ -28,13 +28,16 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 /** Common implementation of {@link CompactRewriter}. */
+// 核心作用是处理合并过程中的非重写任务
+// 层级升级（Upgrade）逻辑：定义了如何不经过物理重写直接提升文件的层级。
+// 元数据提取：提供工具方法，从复杂的合并结构（Sections）中提取出原始文件的元数据，以便记录“合并前（Before）”的文件集合。
 public abstract class AbstractCompactRewriter implements CompactRewriter {
-
+    // 将单个数据文件提升到目标层级，而无需重新读取和写入数据。
     @Override
     public CompactResult upgrade(int outputLevel, DataFileMeta file) throws Exception {
         return new CompactResult(file, file.upgrade(outputLevel));
     }
-
+    // 用于从“待合并段（Sections）”结构中提取出所有的原始文件元数据。
     protected static List<DataFileMeta> extractFilesFromSections(List<List<SortedRun>> sections) {
         return sections.stream()
                 .flatMap(Collection::stream)

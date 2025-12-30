@@ -39,15 +39,25 @@ import java.util.Optional;
  * <p>See RocksDb Universal-Compaction:
  * https://github.com/facebook/rocksdb/wiki/Universal-Compaction.
  */
+// UniversalCompaction 类实现了 RocksDB 风格的 通用合并策略 (Universal Compaction)。
+// 这是一种非常灵活且高效的合并算法，设计初衷是提供更低的写入放大 (Write Amplification)，并允许用户在读取放大和空间放大之间进行权衡。
+// 主要职责是挑选最合适的有序运行 (Sorted Runs) 进行合并
+// 与传统的层级合并（Tiered/Leveled）不同，它不强制要求每一层的大小，而是根据以下几个核心条件来触发合并：
+// 空间放大触发：当除最后一层外的所有文件大小之和过大时，触发全量合并，释放过期或已删除数据的空间。
+// 大小比例触发：如果新产生的较小文件之和与下一个大文件的大小比例满足阈值，则将它们合并。
+// 文件数量触发：当分桶内的 SortedRun 数量超过限制时，触发合并以降低读取压力。
 public class UniversalCompaction implements CompactStrategy {
 
     private static final Logger LOG = LoggerFactory.getLogger(UniversalCompaction.class);
-
+    // 空间放大系数阈值（百分比）。如果“非最后一层文件大小之和 / 最后一层大小”超过此比例，触发全量合并。
     private final int maxSizeAmp;
+    // 大小比例阈值。用于判断是否将前面较小的若干个 Run 与后面一个较大的 Run 合并。
     private final int sizeRatio;
+    // 合并触发数量。当 Run 的总数超过这个值时，强制执行合并决策。
     private final int numRunCompactionTrigger;
-
+    // 用于支持提前触发全量合并的逻辑（例如基于时间或数据量）。
     @Nullable private final EarlyFullCompaction earlyFullCompact;
+    // 支持高峰/低峰期策略，在业务低峰期可以设置更激进的合并参数，以牺牲空间利用率换取高性能。
     @Nullable private final OffPeakHours offPeakHours;
 
     public UniversalCompaction(
