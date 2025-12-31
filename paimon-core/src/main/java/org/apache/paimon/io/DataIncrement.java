@@ -27,12 +27,26 @@ import java.util.Objects;
 import java.util.stream.Collectors;
 
 /** Increment of data files, changelog files and index files. */
-public class DataIncrement {
+// DataIncrement 是一个非常关键的容器类（POJO），它封装了一个写入事务中产生的所有文件变更信息。
+// DataIncrement（数据增量）的主要作用是作为元数据载体，描述了表在某个批次写入（例如 Flink 的一个 Checkpoint）后，底层存储文件的具体变化情况。
+// Paimon 基于 LSM-Tree 架构，数据的变更并不是直接修改原文件，而是通过生成新文件和标记旧文件删除来实现的。DataIncrement 就像是一个“变动清单”，它告诉系统：
+// 增加了哪些新数据文件？
+// 哪些旧文件因为合并（Compaction）而失效了？
+// 产生了哪些用于流式消费的 Changelog 文件？
+// 索引文件（Lookup 索引等）有什么变化？
 
+public class DataIncrement {
+    // 新增数据文件列表。
+    // 包含本次写入产生的 L0 文件，或 Compaction 产生的高层文件。
     private final List<DataFileMeta> newFiles;
+    // 待删除数据文件列表。记录因合并而被替换掉的旧文件。
+    // 注意：在 Paimon 中，“删除”通常是逻辑标记，文件物理删除由清理机制负责。
     private final List<DataFileMeta> deletedFiles;
+    // 变更日志文件列表。如果启用了 changelog-producer，这些文件记录了 INSERT/UPDATE/DELETE 的具体流水。
     private final List<DataFileMeta> changelogFiles;
+    // 新增索引文件列表。例如 Hash 索引或 Lookup 索引在写入后产生的新索引文件。
     private final List<IndexFileMeta> newIndexFiles;
+    // 待删除索引文件列表。过时的索引文件，逻辑同 deletedFiles。
     private final List<IndexFileMeta> deletedIndexFiles;
 
     public DataIncrement(
